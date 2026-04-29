@@ -5,66 +5,38 @@ import json
 import os
 import plotly.express as px
 from datetime import datetime
+import urllib.request
+import re
 
 # 📱 앱 설정
-st.set_page_config(page_title="성우 & 지영 자산관리 V5.3", layout="wide")
+st.set_page_config(page_title="성우 & 지영 자산관리 V5.5", layout="wide")
 
-# 🎨 4번 반영: 입력창 시인성 및 전체 UI 디자인 대폭 개선
+# 🎨 디자인 스타일
 st.markdown("""
 <style>
-    /* 전체 배경 및 텍스트 기본색 */
-    .stApp { 
-        background-color: #f2f4f6 !important; 
-        color: #333d4b !important;
-    }
-    
-    /* 💡 입력창(텍스트, 숫자) 테두리 및 배경색 뚜렷하게 강조 */
+    .stApp { background-color: #f2f4f6 !important; color: #333d4b !important; }
     .stTextInput input, .stNumberInput input {
-        background-color: #ffffff !important;
-        border: 1px solid #c8d0d8 !important;
-        border-radius: 8px !important;
-        color: #191f28 !important;
-        padding: 10px 12px !important;
-        box-shadow: inset 0 1px 2px rgba(0,0,0,0.02);
+        background-color: #ffffff !important; border: 1px solid #c8d0d8 !important;
+        border-radius: 8px !important; color: #191f28 !important;
+        padding: 10px 12px !important; box-shadow: inset 0 1px 2px rgba(0,0,0,0.02);
     }
     .stTextInput input:focus, .stNumberInput input:focus {
-        border-color: #3182f6 !important;
-        box-shadow: 0 0 0 2px rgba(49,130,246,0.2) !important;
+        border-color: #3182f6 !important; box-shadow: 0 0 0 2px rgba(49,130,246,0.2) !important;
     }
-    
-    /* 💡 셀렉트박스 테두리 강조 */
     div[data-baseweb="select"] > div {
-        background-color: #ffffff !important;
-        border: 1px solid #c8d0d8 !important;
-        border-radius: 8px !important;
+        background-color: #ffffff !important; border: 1px solid #c8d0d8 !important; border-radius: 8px !important;
     }
-
-    /* 요약 카드 디자인 */
     div[data-testid="metric-container"] {
-        background-color: white;
-        padding: 20px;
-        border-radius: 16px;
-        box-shadow: 0 4px 20px rgba(0,0,0,0.04);
-        border: 1px solid #f2f4f6;
+        background-color: white; padding: 20px; border-radius: 16px;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.04); border: 1px solid #f2f4f6;
     }
-    
-    /* 아코디언(Expander) 박스 디자인 */
     .st-expander {
-        background-color: white !important;
-        border-radius: 12px !important;
-        border: 1px solid #e5e8eb !important;
-        box-shadow: 0 2px 10px rgba(0,0,0,0.02) !important;
+        background-color: white !important; border-radius: 12px !important;
+        border: 1px solid #e5e8eb !important; box-shadow: 0 2px 10px rgba(0,0,0,0.02) !important;
     }
-    
-    /* 비밀번호 로그인 박스 */
     .login-box {
-        background-color: white;
-        padding: 30px;
-        border-radius: 20px;
-        border: 1px solid #e5e8eb;
-        box-shadow: 0 10px 30px rgba(0,0,0,0.05);
-        max-width: 400px;
-        margin: 0 auto;
+        background-color: white; padding: 30px; border-radius: 20px; border: 1px solid #e5e8eb;
+        box-shadow: 0 10px 30px rgba(0,0,0,0.05); max-width: 400px; margin: 0 auto;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -80,24 +52,11 @@ if not st.session_state["logged_in"]:
     st.markdown("<h3 style='text-align: center; color: #191f28;'>🔒 성우 & 지영 자산관리</h3>", unsafe_allow_html=True)
     user_input = st.text_input("가족 비밀번호", type="password", placeholder="비밀번호를 입력하세요")
     if st.button("앱 열기", use_container_width=True):
-        if user_input == FAMILY_PIN: 
-            st.session_state["logged_in"] = True
-            st.rerun()
+        if user_input == FAMILY_PIN: st.session_state["logged_in"] = True; st.rerun()
         else: st.error("비밀번호가 틀렸습니다.")
     st.markdown("</div>", unsafe_allow_html=True)
 else:
     DATA_FILE = "family_finance_data_v2.json"
-
-    KOR_NAMES = {
-        "005930": "삼성전자", "000660": "SK하이닉스", "373220": "LG에너지솔루션", 
-        "207940": "삼성바이오로직스", "005380": "현대차", "000270": "기아", "068270": "셀트리온", 
-        "005490": "POSCO홀딩스", "035420": "NAVER", "035720": "카카오", "005935": "삼성전자우"
-    }
-    USA_NAMES = {
-        "AAPL": "애플", "MSFT": "마이크로소프트", "NVDA": "엔비디아", "TSLA": "테슬라",
-        "AMZN": "아마존", "META": "메타 플랫폼스", "GOOGL": "알파벳 A", "MU": "마이크론",
-        "PLTR": "팔란티어", "CPNG": "쿠팡", "ORCL": "오라클", "OXY": "옥시덴탈", "AMR": "알파 메탈러지컬", "BKSY": "블랙스카이"
-    }
 
     def load_data():
         if os.path.exists(DATA_FILE):
@@ -132,50 +91,57 @@ else:
 
     @st.cache_data(ttl=3600)
     def get_stock_data(ticker):
-        # 💡 1, 2번 반영: 에러 방어력 극대화 로직
         clean_ticker = ticker.upper().split('.')[0]
-        fallback_name = KOR_NAMES.get(clean_ticker) or USA_NAMES.get(clean_ticker) or clean_ticker
+        real_name = clean_ticker
         
-        t_to_try = [ticker.upper()]
-        # 한국 주식 코드(6자리 숫자)일 경우 .KS, .KQ 자동 추가
+        # 💡 1. 종목명 자동 수집 (네이버 금융 & 야후 파이낸스)
         if clean_ticker.isdigit() and len(clean_ticker) == 6:
-            if "." not in ticker: 
-                t_to_try = [ticker + ".KS", ticker + ".KQ"]
-        
+            # 한국 주식: 네이버 금융 크롤링 (가장 정확한 한글 이름)
+            try:
+                url = f"https://finance.naver.com/item/main.naver?code={clean_ticker}"
+                req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+                html = urllib.request.urlopen(req, timeout=3).read().decode('euc-kr', errors='ignore')
+                match = re.search(r'<title>(.*?) : 네이버', html)
+                if match: real_name = match.group(1)
+            except: pass
+            
+            t_to_try = [ticker + ".KS", ticker + ".KQ"] if "." not in ticker else [ticker.upper()]
+        else:
+            # 해외 주식: 야후 파이낸스
+            t_to_try = [ticker.upper()]
+            try:
+                info = yf.Ticker(t_to_try[0]).info
+                if info:
+                    real_name = info.get('shortName') or info.get('longName') or clean_ticker
+            except: pass
+
+        # 💡 2. 주가 및 등락률 데이터 수집
         for t in t_to_try:
             try:
                 stock = yf.Ticker(t)
-                # 💡 주말/공휴일 예외를 피하기 위해 기간을 1달(1mo)로 넉넉하게 잡음
                 hist = stock.history(period="1mo") 
                 
+                # 결측치(NaN) 제거
+                if not hist.empty:
+                    hist = hist.dropna(subset=["Close"])
+                    
                 if not hist.empty:
                     curr = float(hist["Close"].iloc[-1])
                     prev = float(hist["Close"].iloc[-2]) if len(hist) >= 2 else curr
-                    
-                    real_name = fallback_name
-                    # 💡 주식 이름을 가져오다 에러가 나도, 가격(curr)은 무조건 반환하도록 분리!
-                    try:
-                        info = stock.info
-                        if info and ('shortName' in info or 'longName' in info):
-                            real_name = info.get('shortName') or info.get('longName') or fallback_name
-                    except: pass # 이름 가져오기 실패해도 무시
-                    
                     return curr, curr - prev, (curr - prev) / prev * 100, real_name
             except: continue
             
-        return 0.0, 0.0, 0.0, fallback_name
+        return 0.0, 0.0, 0.0, real_name
 
     data = load_data()
     ex_rate = get_exchange_rate()
 
-    # 상단 헤더
     st.markdown("<h2 style='color: #191f28; font-weight: 700;'>📊 통합 자산 포트폴리오</h2>", unsafe_allow_html=True)
     col_rate, col_logout = st.columns([5, 1])
     with col_rate: st.markdown(f"<span style='color: #8b95a1;'>💱 실시간 환율: <b>1$ = {ex_rate:,.2f}원</b></span>", unsafe_allow_html=True)
     with col_logout:
         if st.button("🔒 로그아웃", use_container_width=True): st.session_state["logged_in"] = False; st.rerun()
 
-    # 데이터 관리 영역
     with st.expander("✏️ 자산 데이터 관리 (입력/수정)"):
         tab1, tab2, tab3, tab4, tab5 = st.tabs(["💵 현금", "📈 주식 등록", "⚙️ 보유주식 수정", "📜 기록 관리", "💾 데이터 보관소"])
         
@@ -210,7 +176,7 @@ else:
                 col3, col4 = st.columns(2)
                 s_qty = col3.number_input("수량", min_value=0.0)
                 s_val = col4.number_input("평균단가", min_value=0.0)
-                s_note = st.text_input("비고 (메모사항)")
+                s_note = st.text_input("비고 (계좌종류 등)")
                 if st.form_submit_button("주식 추가"):
                     data["stocks"].append({
                         "owner": s_owner, "broker": s_broker, "ticker": s_ticker, "name": "",
@@ -220,7 +186,6 @@ else:
                     
         with tab3:
             for i, s in enumerate(data["stocks"]):
-                # 💡 3번 반영: 이름이 비어있으면 코드를 대신 띄워줌 (오류 방지)
                 display_name = s.get('name') if s.get('name') else s['ticker']
                 with st.expander(f"[{s['owner']}] {display_name} ({s['broker']})"):
                     new_n = st.text_input("종목명 강제지정", value=s.get('name', ''), key=f"en_{i}", placeholder="비워두면 자동 검색됩니다")
@@ -250,7 +215,6 @@ else:
 
     st.divider()
     
-    # 계산 및 통합 로직
     view_currency = st.radio("💰 통화 기준", ["원화(KRW)", "달러(USD)"], horizontal=True)
     is_usd_view = view_currency == "달러(USD)"
     unit, div = ("$", ex_rate) if is_usd_view else ("원", 1)
@@ -298,7 +262,6 @@ else:
     total_asset_krw = total_cash_krw + total_stock_krw
     if total_cash_krw > 0: chart_data.append({"항목": "현금", "평가금액": total_cash_krw})
 
-    # 메트릭 카드
     c1, c2, c3 = st.columns(3)
     c1.metric("총 자산", f"{total_asset_krw/div:,.0f}{unit}")
     c2.metric("주식", f"{total_stock_krw/div:,.0f}{unit}")
@@ -316,15 +279,9 @@ else:
         val_div = 10000 if not is_usd_view else ex_rate
         h_df["총자산"], h_df["주식"], h_df["현금"] = h_df["total"]/val_div, h_df["stock"]/val_div, h_df["cash"]/val_div
         fig = px.line(h_df, x="date", y=["총자산", "주식", "현금"], markers=True)
-        fig.update_layout(
-            yaxis_title="만원" if not is_usd_view else "USD", 
-            legend_title="", 
-            plot_bgcolor='rgba(0,0,0,0)', 
-            paper_bgcolor='rgba(0,0,0,0)'
-        )
+        fig.update_layout(yaxis_title="만원" if not is_usd_view else "USD", legend_title="", plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
         st.plotly_chart(fig, use_container_width=True)
 
-    # 비중 차트
     if chart_data:
         st.divider()
         st.markdown("<h3 style='color:#191f28;'>🍩 포트폴리오 비중</h3>", unsafe_allow_html=True)
@@ -332,7 +289,6 @@ else:
         fig_pie.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
         st.plotly_chart(fig_pie, use_container_width=True)
 
-    # 테이블 그리기 함수
     def draw_toss_table(df_list):
         if not df_list: 
             st.markdown("<p style='color:#8b95a1;'>보유 주식이 없습니다.</p>", unsafe_allow_html=True)
@@ -371,7 +327,6 @@ else:
     st.markdown("<h3 style='color:#191f28;'>🇺🇸 해외 주식</h3>", unsafe_allow_html=True)
     draw_toss_table([x for x in final_stock_list if x['ticker'].isalpha()])
 
-    # AI 뱅커 영역
     st.divider()
     with st.expander("🤖 AI 프라이빗 뱅커에게 분석 요청하기 (클릭하여 열기)", expanded=False):
         st.markdown("👇 아래 상자 우측 상단의 **복사(📋) 버튼**을 누르고, 저에게 붙여넣기 해주세요!")

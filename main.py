@@ -9,9 +9,9 @@ import urllib.request
 import re
 
 # 📱 앱 설정
-st.set_page_config(page_title="성우 & 지영 자산관리 V5.5", layout="wide")
+st.set_page_config(page_title="성우 & 지영 자산관리 V5.6", layout="wide")
 
-# 🎨 디자인 스타일
+# 🎨 디자인 스타일 (표 가로 간격 최적화)
 st.markdown("""
 <style>
     .stApp { background-color: #f2f4f6 !important; color: #333d4b !important; }
@@ -58,6 +58,19 @@ if not st.session_state["logged_in"]:
 else:
     DATA_FILE = "family_finance_data_v2.json"
 
+    # 💡 1번 반영: 구름 서버 차단 방지를 위한 확실한 번역 사전 부활!
+    KOR_NAMES = {
+        "005930": "삼성전자", "000660": "SK하이닉스", "373220": "LG에너지솔루션", 
+        "207940": "삼성바이오로직스", "005380": "현대차", "000270": "기아", "068270": "셀트리온", 
+        "005490": "POSCO홀딩스", "035420": "NAVER", "035720": "카카오", "005935": "삼성전자우",
+        "133690": "TIGER 미국다우존스30", "360750": "TIGER 미국S&P500", "069500": "KODEX 200"
+    }
+    USA_NAMES = {
+        "AAPL": "애플", "MSFT": "마이크로소프트", "NVDA": "엔비디아", "TSLA": "테슬라",
+        "AMZN": "아마존", "META": "메타 플랫폼스", "GOOGL": "알파벳 A", "MU": "마이크론",
+        "PLTR": "팔란티어", "CPNG": "쿠팡", "ORCL": "오라클", "OXY": "옥시덴탈", "AMR": "알파 메탈러지컬", "BKSY": "블랙스카이"
+    }
+
     def load_data():
         if os.path.exists(DATA_FILE):
             try:
@@ -92,36 +105,37 @@ else:
     @st.cache_data(ttl=3600)
     def get_stock_data(ticker):
         clean_ticker = ticker.upper().split('.')[0]
-        real_name = clean_ticker
         
-        # 💡 1. 종목명 자동 수집 (네이버 금융 & 야후 파이낸스)
-        if clean_ticker.isdigit() and len(clean_ticker) == 6:
-            # 한국 주식: 네이버 금융 크롤링 (가장 정확한 한글 이름)
-            try:
-                url = f"https://finance.naver.com/item/main.naver?code={clean_ticker}"
-                req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-                html = urllib.request.urlopen(req, timeout=3).read().decode('euc-kr', errors='ignore')
-                match = re.search(r'<title>(.*?) : 네이버', html)
-                if match: real_name = match.group(1)
-            except: pass
-            
-            t_to_try = [ticker + ".KS", ticker + ".KQ"] if "." not in ticker else [ticker.upper()]
-        else:
-            # 해외 주식: 야후 파이낸스
-            t_to_try = [ticker.upper()]
-            try:
-                info = yf.Ticker(t_to_try[0]).info
-                if info:
-                    real_name = info.get('shortName') or info.get('longName') or clean_ticker
-            except: pass
+        # 1차: 무조건 내장 사전에서 이름 찾기 (가장 안정적)
+        real_name = KOR_NAMES.get(clean_ticker) or USA_NAMES.get(clean_ticker)
+        
+        # 2차: 사전에 없으면 인터넷 뒤지기 (하이브리드 방식)
+        if not real_name:
+            real_name = clean_ticker
+            if clean_ticker.isdigit() and len(clean_ticker) == 6:
+                try:
+                    url = f"https://finance.naver.com/item/main.naver?code={clean_ticker}"
+                    req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+                    html = urllib.request.urlopen(req, timeout=3).read().decode('euc-kr', errors='ignore')
+                    match = re.search(r'<title>(.*?) : 네이버', html)
+                    if match: real_name = match.group(1)
+                except: pass
+            else:
+                try:
+                    info = yf.Ticker(ticker.upper()).info
+                    if info: real_name = info.get('shortName') or info.get('longName') or clean_ticker
+                except: pass
 
-        # 💡 2. 주가 및 등락률 데이터 수집
+        t_to_try = [ticker.upper()]
+        if clean_ticker.isdigit() and len(clean_ticker) == 6:
+            if "." not in ticker: 
+                t_to_try = [ticker + ".KS", ticker + ".KQ"]
+
         for t in t_to_try:
             try:
                 stock = yf.Ticker(t)
                 hist = stock.history(period="1mo") 
                 
-                # 결측치(NaN) 제거
                 if not hist.empty:
                     hist = hist.dropna(subset=["Close"])
                     
@@ -289,18 +303,19 @@ else:
         fig_pie.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
         st.plotly_chart(fig_pie, use_container_width=True)
 
+    # 💡 2번 반영: width: 100% 옵션을 빼서 표가 화면 끝까지 억지로 늘어나지 않고 콤팩트하게 모이도록 수정!
     def draw_toss_table(df_list):
         if not df_list: 
             st.markdown("<p style='color:#8b95a1;'>보유 주식이 없습니다.</p>", unsafe_allow_html=True)
             return
         
-        html = '<div style="overflow-x: auto; background-color: white; border-radius: 16px; padding: 15px; box-shadow: 0 4px 20px rgba(0,0,0,0.03); margin-bottom: 25px;">'
-        html += '<table style="border-collapse: collapse; width: 100%; font-size: 14px; color: #191f28;">'
+        html = '<div style="overflow-x: auto; background-color: white; border-radius: 16px; padding: 10px 15px; box-shadow: 0 4px 20px rgba(0,0,0,0.03); margin-bottom: 25px;">'
+        html += '<table style="border-collapse: collapse; font-size: 14px; color: #191f28; white-space: nowrap;">'
         html += '<thead><tr style="border-bottom: 1px solid #e5e8eb;">'
         cols = ["소유", "종목명", "수량", "현재가<br>(평단가)", "평가금액<br>(매입금액)", "평가손익<br>(수익률)", "전일대비", "비고"]
         for c in cols: 
             align = "center" if c in ['소유', '수량'] else "left" if c in ['종목명', '비고'] else "right"
-            html += f'<th style="padding: 12px 10px; text-align: {align}; color: #8b95a1; font-weight: 500; font-size: 13px;">{c}</th>'
+            html += f'<th style="padding: 10px 15px; text-align: {align}; color: #8b95a1; font-weight: 500; font-size: 13px;">{c}</th>'
         html += '</tr></thead><tbody>'
         
         for r in df_list:
@@ -310,14 +325,14 @@ else:
             c_clr = '#f04452' if r['d_chg'] > 0 else '#3182f6' if r['d_chg'] < 0 else '#191f28'
             
             html += f'''<tr style="border-bottom: 1px solid #f2f4f6;">
-                <td style="padding: 16px 10px; text-align: center; font-weight: 600;">{r['owner']}</td>
-                <td style="padding: 16px 10px; text-align: left; font-weight: 600;">{r['name']}<br><span style="font-size:12px; color: #8b95a1; font-weight:400;">{r['ticker']}</span></td>
-                <td style="padding: 16px 10px; text-align: center; font-weight: 500;">{int(r['qty'])}</td>
-                <td style="padding: 16px 10px; text-align: right; font-weight: 500;">{r['curr_p']:,.1f}<br><span style="font-size:12px; color: #8b95a1;">({r['avg_p']:,.1f})</span></td>
-                <td style="padding: 16px 10px; text-align: right; font-weight: 500;">{r['eval_krw']/div:,.1f}{unit}<br><span style="font-size:12px; color: #8b95a1;">({r['buy_krw']/div:,.1f}{unit})</span></td>
-                <td style="padding: 16px 10px; text-align: right; color: {p_clr}; font-weight: 700;">{profit/div:,.1f}{unit}<br><span style="font-size:12px;">({p_pct:+.2f}%)</span></td>
-                <td style="padding: 16px 10px; text-align: right; color: {c_clr}; font-weight: 700;">{r['d_chg']:,.1f}{unit}<br><span style="font-size:12px;">({r['d_pct']:+.2f}%)</span></td>
-                <td style="padding: 16px 10px; text-align: left; font-size: 13px; color: #8b95a1; line-height: 1.4;">{r['remarks']}</td>
+                <td style="padding: 12px 15px; text-align: center; font-weight: 600;">{r['owner']}</td>
+                <td style="padding: 12px 15px; text-align: left; font-weight: 600;">{r['name']}<br><span style="font-size:12px; color: #8b95a1; font-weight:400;">{r['ticker']}</span></td>
+                <td style="padding: 12px 15px; text-align: center; font-weight: 500;">{int(r['qty'])}</td>
+                <td style="padding: 12px 15px; text-align: right; font-weight: 500;">{r['curr_p']:,.1f}<br><span style="font-size:12px; color: #8b95a1;">({r['avg_p']:,.1f})</span></td>
+                <td style="padding: 12px 15px; text-align: right; font-weight: 500;">{r['eval_krw']/div:,.1f}{unit}<br><span style="font-size:12px; color: #8b95a1;">({r['buy_krw']/div:,.1f}{unit})</span></td>
+                <td style="padding: 12px 15px; text-align: right; color: {p_clr}; font-weight: 700;">{profit/div:,.1f}{unit}<br><span style="font-size:12px;">({p_pct:+.2f}%)</span></td>
+                <td style="padding: 12px 15px; text-align: right; color: {c_clr}; font-weight: 700;">{r['d_chg']:,.1f}{unit}<br><span style="font-size:12px;">({r['d_pct']:+.2f}%)</span></td>
+                <td style="padding: 12px 15px; text-align: left; font-size: 13px; color: #8b95a1;">{r['remarks']}</td>
             </tr>'''
         html += '</tbody></table></div>'
         st.markdown(html, unsafe_allow_html=True)

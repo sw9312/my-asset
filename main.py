@@ -9,12 +9,30 @@ import urllib.request
 import re
 
 # 📱 앱 설정
-st.set_page_config(page_title="성우 & 지영 자산관리 V5.6", layout="wide")
+st.set_page_config(page_title="성우 & 지영 자산관리 V5.7", layout="wide")
 
-# 🎨 디자인 스타일 (표 가로 간격 최적화)
+# 🎨 디자인 스타일 
 st.markdown("""
 <style>
-    .stApp { background-color: #f2f4f6 !important; color: #333d4b !important; }
+    /* 💡 1번 반영: PC 화면 꽉 참 방지 (최대 너비 1100px로 깔끔하게 모아줌) */
+    .block-container {
+        max-width: 1100px !important;
+        padding-top: 2rem !important;
+    }
+
+    /* 전체 배경 */
+    .stApp { background-color: #f2f4f6 !important; }
+
+    /* 💡 2번 반영: 모바일 다크모드 강제 무력화 (글씨가 하얗게 사라지는 현상 방지) */
+    .stTextInput p, .stNumberInput p, .stSelectbox p, .stRadio p, .stCheckbox p, .stMarkdown p, h1, h2, h3, h4 {
+        color: #191f28 !important;
+    }
+    div[data-testid="stExpander"] summary p {
+        color: #191f28 !important;
+        font-weight: 700 !important;
+    }
+
+    /* 입력창 및 셀렉트박스 스타일 */
     .stTextInput input, .stNumberInput input {
         background-color: #ffffff !important; border: 1px solid #c8d0d8 !important;
         border-radius: 8px !important; color: #191f28 !important;
@@ -26,10 +44,19 @@ st.markdown("""
     div[data-baseweb="select"] > div {
         background-color: #ffffff !important; border: 1px solid #c8d0d8 !important; border-radius: 8px !important;
     }
+    
+    /* 요약 카드 및 로그인 박스 */
     div[data-testid="metric-container"] {
         background-color: white; padding: 20px; border-radius: 16px;
         box-shadow: 0 4px 20px rgba(0,0,0,0.04); border: 1px solid #f2f4f6;
     }
+    div[data-testid="metric-container"] label {
+        color: #8b95a1 !important;
+    }
+    div[data-testid="metric-container"] div[data-testid="stMetricValue"] {
+        color: #191f28 !important;
+    }
+    
     .st-expander {
         background-color: white !important; border-radius: 12px !important;
         border: 1px solid #e5e8eb !important; box-shadow: 0 2px 10px rgba(0,0,0,0.02) !important;
@@ -58,7 +85,6 @@ if not st.session_state["logged_in"]:
 else:
     DATA_FILE = "family_finance_data_v2.json"
 
-    # 💡 1번 반영: 구름 서버 차단 방지를 위한 확실한 번역 사전 부활!
     KOR_NAMES = {
         "005930": "삼성전자", "000660": "SK하이닉스", "373220": "LG에너지솔루션", 
         "207940": "삼성바이오로직스", "005380": "현대차", "000270": "기아", "068270": "셀트리온", 
@@ -105,11 +131,8 @@ else:
     @st.cache_data(ttl=3600)
     def get_stock_data(ticker):
         clean_ticker = ticker.upper().split('.')[0]
-        
-        # 1차: 무조건 내장 사전에서 이름 찾기 (가장 안정적)
         real_name = KOR_NAMES.get(clean_ticker) or USA_NAMES.get(clean_ticker)
         
-        # 2차: 사전에 없으면 인터넷 뒤지기 (하이브리드 방식)
         if not real_name:
             real_name = clean_ticker
             if clean_ticker.isdigit() and len(clean_ticker) == 6:
@@ -303,14 +326,14 @@ else:
         fig_pie.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
         st.plotly_chart(fig_pie, use_container_width=True)
 
-    # 💡 2번 반영: width: 100% 옵션을 빼서 표가 화면 끝까지 억지로 늘어나지 않고 콤팩트하게 모이도록 수정!
+    # 💡 3번 반영: 표 상단에 합계가 포함된 테이블 그리기 함수
     def draw_toss_table(df_list):
         if not df_list: 
             st.markdown("<p style='color:#8b95a1;'>보유 주식이 없습니다.</p>", unsafe_allow_html=True)
             return
         
         html = '<div style="overflow-x: auto; background-color: white; border-radius: 16px; padding: 10px 15px; box-shadow: 0 4px 20px rgba(0,0,0,0.03); margin-bottom: 25px;">'
-        html += '<table style="border-collapse: collapse; font-size: 14px; color: #191f28; white-space: nowrap;">'
+        html += '<table style="border-collapse: collapse; font-size: 14px; color: #191f28; white-space: nowrap; width: 100%;">'
         html += '<thead><tr style="border-bottom: 1px solid #e5e8eb;">'
         cols = ["소유", "종목명", "수량", "현재가<br>(평단가)", "평가금액<br>(매입금액)", "평가손익<br>(수익률)", "전일대비", "비고"]
         for c in cols: 
@@ -318,6 +341,26 @@ else:
             html += f'<th style="padding: 10px 15px; text-align: {align}; color: #8b95a1; font-weight: 500; font-size: 13px;">{c}</th>'
         html += '</tr></thead><tbody>'
         
+        # 합계 로직 추가
+        total_buy = sum(r['buy_krw'] for r in df_list)
+        total_eval = sum(r['eval_krw'] for r in df_list)
+        total_profit = total_eval - total_buy
+        total_p_pct = (total_profit / total_buy * 100) if total_buy > 0 else 0
+        total_d_chg = sum(r['d_chg'] for r in df_list)
+        
+        tp_clr = '#f04452' if total_profit > 0 else '#3182f6' if total_profit < 0 else '#191f28'
+        tc_clr = '#f04452' if total_d_chg > 0 else '#3182f6' if total_d_chg < 0 else '#191f28'
+        
+        # 최상단 합계 행 렌더링
+        html += f'''<tr style="background-color: #f9fafb; border-bottom: 2px solid #e5e8eb;">
+            <td colspan="4" style="padding: 12px 15px; text-align: center; font-weight: 800; color: #191f28;">합 계</td>
+            <td style="padding: 12px 15px; text-align: right; font-weight: 800; color: #191f28;">{total_eval/div:,.1f}{unit}<br><span style="font-size:12px; color: #8b95a1; font-weight:600;">({total_buy/div:,.1f}{unit})</span></td>
+            <td style="padding: 12px 15px; text-align: right; color: {tp_clr}; font-weight: 800;">{total_profit/div:,.1f}{unit}<br><span style="font-size:12px;">({total_p_pct:+.2f}%)</span></td>
+            <td style="padding: 12px 15px; text-align: right; color: {tc_clr}; font-weight: 800;">{total_d_chg:,.1f}{unit}</td>
+            <td style="padding: 12px 15px;"></td>
+        </tr>'''
+        
+        # 개별 종목 행 렌더링
         for r in df_list:
             profit = r['eval_krw'] - r['buy_krw']
             p_pct = (profit / r['buy_krw'] * 100) if r['buy_krw'] > 0 else 0

@@ -6,26 +6,34 @@ import os
 import plotly.express as px
 from datetime import datetime
 
-# 📱 토스증권 스타일을 위한 와이드 모드 유지
-st.set_page_config(page_title="성우 & 지영 자산관리 V5.1", layout="wide")
+# 📱 앱 설정
+st.set_page_config(page_title="성우 & 지영 자산관리 V5.2", layout="wide")
 
-# 🎨 UI 스타일 적용
+# 🎨 1, 2번 반영: 모바일 시인성 및 로그인창 디자인 강화
 st.markdown("""
 <style>
-    .stApp { background-color: #f2f4f6; font-family: 'Pretendard', -apple-system, sans-serif; }
+    /* 전체 배경색 강제 고정 (모바일 하얀 배경 방지) */
+    .stApp { 
+        background-color: #f2f4f6 !important; 
+        color: #333d4b !important;
+    }
+    /* 메트릭 카드 및 섹션 디자인 */
     div[data-testid="metric-container"] {
         background-color: white;
         padding: 20px;
         border-radius: 16px;
-        box-shadow: 0 4px 20px rgba(0,0,0,0.04);
-        border: none;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.05);
     }
-    .st-expander {
+    /* 로그인 박스 스타일 */
+    .login-box {
         background-color: white;
-        border-radius: 12px;
-        border: none;
-        box-shadow: 0 2px 10px rgba(0,0,0,0.02);
+        padding: 30px;
+        border-radius: 20px;
+        border: 2px solid #e5e8eb;
+        box-shadow: 0 10px 30px rgba(0,0,0,0.1);
     }
+    /* 텍스트 색상 보정 */
+    p, span, label { color: #333d4b !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -36,28 +44,25 @@ if "logged_in" not in st.session_state:
     st.session_state["logged_in"] = False
 
 if not st.session_state["logged_in"]:
-    st.markdown("## 🔒 성우 & 지영 자산관리")
-    user_input = st.text_input("가족 비밀번호 입력", type="password")
-    if st.button("앱 열기"):
-        if user_input == FAMILY_PIN: st.session_state["logged_in"] = True; st.rerun()
+    st.markdown("<div class='login-box'>", unsafe_allow_html=True)
+    st.markdown("### 🔒 성우 & 지영 자산관리")
+    user_input = st.text_input("가족 비밀번호를 입력하세요", type="password", help="배경과 구분되도록 테두리를 강화했습니다.")
+    if st.button("앱 열기", use_container_width=True):
+        if user_input == FAMILY_PIN: 
+            st.session_state["logged_in"] = True
+            st.rerun()
         else: st.error("비밀번호가 틀렸습니다.")
+    st.markdown("</div>", unsafe_allow_html=True)
 else:
+    # 데이터 파일 경로 (스트림릿 클라우드는 재배포 시 이 파일이 초기화될 수 있음)
     DATA_FILE = "family_finance_data_v2.json"
 
     def load_data():
         if os.path.exists(DATA_FILE):
-            with open(DATA_FILE, "r", encoding="utf-8") as f:
-                d = json.load(f)
-                if "cash" in d and "cash_list" not in d:
-                    d["cash_list"] = [{"owner": k, "label": "현금", "amount": v, "currency": "KRW(원)"} for k, v in d["cash"].items()]
-                    del d["cash"]
-                for c in d.get("cash_list", []):
-                    if "currency" not in c: c["currency"] = "KRW(원)"
-                if "history" not in d: d["history"] = []
-                for s in d.get("stocks", []):
-                    if "name" not in s: s["name"] = ""
-                    if "note" not in s: s["note"] = "" 
-                return d
+            try:
+                with open(DATA_FILE, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except: pass
         return {"cash_list": [], "stocks": [], "history": []}
 
     def save_data(data):
@@ -66,8 +71,13 @@ else:
 
     @st.cache_data(ttl=600)
     def get_exchange_rate():
-        try: return yf.Ticker("KRW=X").history(period="1d")["Close"].iloc[-1]
-        except: return 1350.0
+        # 💡 3번 반영: 환율 로직 보강 (여러 코드 시도)
+        for ticker in ["USDKRW=X", "KRW=X"]:
+            try:
+                rate = yf.Ticker(ticker).history(period="1d")["Close"].iloc[-1]
+                if rate > 1000: return rate
+            except: continue
+        return 1380.0 # 모든 시도 실패 시 최근 평균 환율로 백업
 
     @st.cache_data(ttl=3600)
     def get_stock_data(ticker):
@@ -90,15 +100,16 @@ else:
     data = load_data()
     ex_rate = get_exchange_rate()
 
-    st.markdown("## 📊 성우 & 지영 자산 포트폴리오")
+    # 상단 헤더
+    st.markdown("## 📊 통합 자산 포트폴리오")
     col_rate, col_logout = st.columns([5, 1])
     with col_rate: st.caption(f"💱 실시간 환율: **1$ = {ex_rate:,.2f}원**")
     with col_logout:
         if st.button("🔒 로그아웃"): st.session_state["logged_in"] = False; st.rerun()
 
-    # 정보 입력 메뉴
+    # 데이터 입력 및 관리
     with st.expander("✏️ 자산 데이터 관리 (입력/수정)"):
-        tab1, tab2, tab3, tab4 = st.tabs(["💵 현금", "📈 주식 등록", "⚙️ 보유주식 수정", "📜 기록 관리"])
+        tab1, tab2, tab3, tab4, tab5 = st.tabs(["💵 현금", "📈 주식 등록", "⚙️ 보유주식 수정", "📜 기록 관리", "💾 데이터 백업/복구"])
         
         with tab1:
             with st.form("cash_form", clear_on_submit=True):
@@ -132,7 +143,6 @@ else:
                 s_qty = col3.number_input("수량", min_value=0.0)
                 s_val = col4.number_input("평균단가", min_value=0.0)
                 s_note = st.text_input("비고 (메모사항)")
-                
                 if st.form_submit_button("주식 추가"):
                     data["stocks"].append({
                         "owner": s_owner, "broker": s_broker, "ticker": s_ticker, "name": "",
@@ -143,35 +153,44 @@ else:
         with tab3:
             for i, s in enumerate(data["stocks"]):
                 with st.expander(f"[{s['owner']}] {s.get('name', s['ticker'])} ({s['broker']})"):
-                    new_n = st.text_input("종목명 강제지정", value=s.get('name', ''), key=f"en_{i}")
-                    new_q = st.number_input("수량 수정", value=float(s['qty']), key=f"eq_{i}")
-                    new_a = st.number_input("평단가 수정", value=float(s['avg_price']), key=f"ea_{i}")
-                    new_note = st.text_input("비고 수정", value=s.get('note', ''), key=f"nt_{i}")
+                    new_n = st.text_input("종목명 지정", value=s.get('name', ''), key=f"en_{i}")
+                    new_q = st.number_input("수량", value=float(s['qty']), key=f"eq_{i}")
+                    new_a = st.number_input("평단가", value=float(s['avg_price']), key=f"ea_{i}")
+                    new_note = st.text_input("비고", value=s.get('note', ''), key=f"nt_{i}")
                     if st.button("저장", key=f"es_{i}"):
                         data["stocks"][i].update({"name": new_n, "qty": new_q, "avg_price": new_a, "note": new_note})
                         save_data(data); st.rerun()
-                    if st.button("이 종목 삭제", key=f"ed_{i}"): data["stocks"].pop(i); save_data(data); st.rerun()
+                    if st.button("삭제", key=f"ed_{i}"): data["stocks"].pop(i); save_data(data); st.rerun()
                         
         with tab4:
-            st.write("기록을 삭제하시려면 버튼을 누르세요.")
             for i, h in enumerate(data["history"]):
                 col_h1, col_h2 = st.columns([4, 1])
                 col_h1.write(f"📅 {h['date']} | {h['total']:,}원")
                 if col_h2.button("삭제", key=f"hdel_{i}"): data["history"].pop(i); save_data(data); st.rerun()
+        
+        with tab5:
+            # 💡 4번 반영: 클라우드 서버 초기화에 대비한 수동 백업/복구 기능
+            st.warning("스트림릿 클라우드는 앱 업데이트 시 데이터 파일이 초기화될 수 있습니다. 아래 텍스트를 메모장에 복사해두시면 언제든 복구 가능합니다.")
+            st.text_area("현재 데이터 (복사하여 보관)", value=json.dumps(data, ensure_ascii=False), height=200)
+            restore_json = st.text_input("복구할 데이터 붙여넣기")
+            if st.button("데이터 복구 실행"):
+                try:
+                    data = json.loads(restore_json)
+                    save_data(data); st.success("데이터가 성공적으로 복구되었습니다!"); st.rerun()
+                except: st.error("올바른 데이터 형식이 아닙니다.")
 
     st.divider()
     
+    # 계산 로직
     view_currency = st.radio("💰 통화 기준", ["원화(KRW)", "달러(USD)"], horizontal=True)
     is_usd_view = view_currency == "달러(USD)"
     unit, div = ("$", ex_rate) if is_usd_view else ("원", 1)
 
-    # 데이터 통합
     processed_stocks = {}
     for s in data["stocks"]:
         key = (s['ticker'], s['owner'])
         is_usd_in = "USD" in s.get("input_currency", "KRW")
         price_krw = s['avg_price'] * ex_rate if is_usd_in else s['avg_price']
-        
         if key not in processed_stocks:
             processed_stocks[key] = {
                 "owner": s['owner'], "ticker": s['ticker'], "name_override": s.get('name', ''),
@@ -191,14 +210,11 @@ else:
     for key, p in processed_stocks.items():
         curr_p, d_chg, d_pct, web_name = get_stock_data(p['ticker'])
         final_name = p['name_override'] if p['name_override'] else web_name
-        
         eval_krw = p['qty'] * curr_p * (ex_rate if p['is_overseas'] else 1)
         total_stock_krw += eval_krw
-        
         avg_p_view = (p['total_buy_krw'] / p['qty']) / (ex_rate if is_usd_view else 1) if p['qty'] > 0 else 0
         curr_p_view = curr_p if p['is_overseas'] else curr_p / (ex_rate if is_usd_view else 1)
         d_chg_view = (d_chg * p['qty'] * (ex_rate if p['is_overseas'] else 1)) / div
-
         final_stock_list.append({
             "owner": p['owner'], "name": final_name, "ticker": p['ticker'],
             "qty": p['qty'], "buy_krw": p['total_buy_krw'], "eval_krw": eval_krw,
@@ -211,59 +227,54 @@ else:
     total_asset_krw = total_cash_krw + total_stock_krw
     if total_cash_krw > 0: chart_data.append({"항목": "현금", "평가금액": total_cash_krw})
 
-    # 요약 카드
+    # 요약 메트릭
     c1, c2, c3 = st.columns(3)
-    c1.metric("내 총 자산", f"{total_asset_krw/div:,.0f}{unit}")
-    c2.metric("주식 평가금액", f"{total_stock_krw/div:,.0f}{unit}")
-    c3.metric("보유 현금", f"{total_cash_krw/div:,.0f}{unit}")
+    c1.metric("총 자산", f"{total_asset_krw/div:,.0f}{unit}")
+    c2.metric("주식", f"{total_stock_krw/div:,.0f}{unit}")
+    c3.metric("현금", f"{total_cash_krw/div:,.0f}{unit}")
     
     st.divider()
-    st.subheader("📈 자산 변동 추이")
-    if st.button("현재 자산 상태 누적 기록하기"):
+    st.subheader("📈 자산 추이")
+    if st.button("현재 자산 누적 기록하기"):
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         data["history"].append({"date": now_str, "total": int(total_asset_krw), "stock": int(total_stock_krw), "cash": int(total_cash_krw)})
         save_data(data); st.rerun()
 
     if data.get("history"):
         h_df = pd.DataFrame(data["history"])
-        if not is_usd_view:
-            h_df["총자산"], h_df["주식"], h_df["현금"] = h_df["total"]/10000, h_df["stock"]/10000, h_df["cash"]/10000
-            fig = px.line(h_df, x="date", y=["총자산", "주식", "현금"], markers=True)
-            fig.update_layout(yaxis_title="금액 (단위: 만원)", legend_title="")
-        else:
-            h_df["총자산"], h_df["주식"], h_df["현금"] = h_df["total"]/ex_rate, h_df["stock"]/ex_rate, h_df["cash"]/ex_rate
-            fig = px.line(h_df, x="date", y=["총자산", "주식", "현금"], markers=True)
-            fig.update_layout(yaxis_title="금액 (단위: USD)", legend_title="")
+        val_div = 10000 if not is_usd_view else ex_rate
+        h_df["총자산"], h_df["주식"], h_df["현금"] = h_df["total"]/val_div, h_df["stock"]/val_div, h_df["cash"]/val_div
+        fig = px.line(h_df, x="date", y=["총자산", "주식", "현금"], markers=True)
+        fig.update_layout(yaxis_title="만원" if not is_usd_view else "USD", legend_title="")
         st.plotly_chart(fig, use_container_width=True)
 
-    st.divider()
+    # 비중 차트
     if chart_data:
-        st.subheader("🍩 포트폴리오 비중")
+        st.subheader("🍩 비중")
         st.plotly_chart(px.pie(pd.DataFrame(chart_data), values="평가금액", names="항목", hole=0.45), use_container_width=True)
 
+    # 토스 스타일 표
     def draw_toss_table(df_list):
         if not df_list: st.caption("보유 주식이 없습니다."); return
         html = '<div style="overflow-x: auto; background-color: white; border-radius: 16px; padding: 10px; box-shadow: 0 4px 20px rgba(0,0,0,0.03); margin-bottom: 20px;">'
-        html += '<table style="border-collapse: collapse; width: 100%; font-size: 14px; font-family: inherit;">'
+        html += '<table style="border-collapse: collapse; width: 100%; font-size: 14px; color: #333d4b;">'
         html += '<thead><tr style="border-bottom: 1px solid #e5e8eb;">'
-        cols = ["소유", "종목명", "수량", "현재가<br>(평단가)", "평가금액<br>(매입금액)", "평가손익<br>(수익률)", "전일대비", "비고(증권사)"]
+        cols = ["소유", "종목명", "수량", "현재가<br>(평단가)", "평가금액<br>(매입금액)", "평가손익<br>(수익률)", "전일대비", "비고"]
         for c in cols: 
-            align = "center" if c in ['소유', '수량'] else "left" if c in ['종목명', '비고(증권사)'] else "right"
+            align = "center" if c in ['소유', '수량'] else "left" if c in ['종목명', '비고'] else "right"
             html += f'<th style="padding: 12px 8px; text-align: {align}; color: #8b95a1; font-weight: 500; font-size: 13px;">{c}</th>'
         html += '</tr></thead><tbody>'
-        
         for r in df_list:
             profit = r['eval_krw'] - r['buy_krw']
             p_pct = (profit / r['buy_krw'] * 100) if r['buy_krw'] > 0 else 0
             p_clr = '#f04452' if profit > 0 else '#3182f6' if profit < 0 else '#333d4b'
             c_clr = '#f04452' if r['d_chg'] > 0 else '#3182f6' if r['d_chg'] < 0 else '#333d4b'
-            
             html += f'''<tr style="border-bottom: 1px solid #f2f4f6;">
-                <td style="padding: 14px 8px; text-align: center; font-weight: 600; color: #333d4b;">{r['owner']}</td>
-                <td style="padding: 14px 8px; text-align: left; font-weight: 600; color: #333d4b;">{r['name']}<br><span style="font-size:12px; color: #8b95a1; font-weight:400;">{r['ticker']}</span></td>
-                <td style="padding: 14px 8px; text-align: center; font-weight: 500;">{int(r['qty'])}</td>
-                <td style="padding: 14px 8px; text-align: right; font-weight: 500;">{r['curr_p']:,.1f}<br><span style="font-size:12px; color: #8b95a1;">({r['avg_p']:,.1f})</span></td>
-                <td style="padding: 14px 8px; text-align: right; font-weight: 500;">{r['eval_krw']/div:,.1f}{unit}<br><span style="font-size:12px; color: #8b95a1;">({r['buy_krw']/div:,.1f}{unit})</span></td>
+                <td style="padding: 14px 8px; text-align: center; font-weight: 600;">{r['owner']}</td>
+                <td style="padding: 14px 8px; text-align: left; font-weight: 600;">{r['name']}<br><span style="font-size:12px; color: #8b95a1; font-weight:400;">{r['ticker']}</span></td>
+                <td style="padding: 14px 8px; text-align: center;">{int(r['qty'])}</td>
+                <td style="padding: 14px 8px; text-align: right;">{r['curr_p']:,.1f}<br><span style="font-size:12px; color: #8b95a1;">({r['avg_p']:,.1f})</span></td>
+                <td style="padding: 14px 8px; text-align: right;">{r['eval_krw']/div:,.1f}{unit}<br><span style="font-size:12px; color: #8b95a1;">({r['buy_krw']/div:,.1f}{unit})</span></td>
                 <td style="padding: 14px 8px; text-align: right; color: {p_clr}; font-weight: 600;">{profit/div:,.1f}{unit}<br><span style="font-size:12px;">({p_pct:+.2f}%)</span></td>
                 <td style="padding: 14px 8px; text-align: right; color: {c_clr}; font-weight: 600;">{r['d_chg']:,.1f}{unit}<br><span style="font-size:12px;">({r['d_pct']:+.2f}%)</span></td>
                 <td style="padding: 14px 8px; text-align: left; font-size: 12px; color: #8b95a1;">{r['remarks']}</td>
@@ -276,36 +287,32 @@ else:
     st.subheader("🇺🇸 해외 주식")
     draw_toss_table([x for x in final_stock_list if x['ticker'].isalpha()])
 
-    # 💡 1,2,3번 반영: 숨김 처리(expanded=False), 직관적 안내문구, 고도화된 프롬프트
+    # AI 분석 요청
     st.divider()
     with st.expander("🤖 AI 프라이빗 뱅커에게 분석 요청하기 (클릭하여 열기)", expanded=False):
-        st.markdown("👇 **아래 회색 상자의 우측 상단 모서리를 터치(또는 마우스 오버)하여 나타나는 복사(📋) 버튼**을 누르고, 저에게 붙여넣기 해주세요!")
-        
-        gemini_prompt = f"""당신은 VVIP 고객의 자산을 관리하는 '최고의 프라이빗 뱅커(PB)'이자 '투자 전략가'입니다.
-현재 '성우'와 '지영' 부부의 통합 자산 포트폴리오 데이터를 전달해 드립니다.
-아래 데이터를 바탕으로 전문가적인 시각에서 심층 분석과 조언을 제공해 주세요.
+        st.markdown("👇 아래 상자 우측 상단의 **복사(📋) 버튼**을 누르고, 저에게 붙여넣기 해주세요!")
+        gemini_prompt = f"""당신은 VVIP 고객의 자산을 관리하는 '최고의 프라이빗 뱅커(PB)'입니다.
+아래 데이터를 바탕으로 전문가적인 시각에서 분석과 조언을 제공해 주세요.
 
 ---
 ### 📊 [포트폴리오 요약]
 * 기준일시: {datetime.now().strftime("%Y년 %m월 %d일 %H:%M")}
-* 총 자산 규모: {total_asset_krw:,.0f} 원
-* 현금성 자산: {total_cash_krw:,.0f} 원 (비중: {(total_cash_krw/total_asset_krw*100) if total_asset_krw else 0:.1f}%)
-* 주식형 자산: {total_stock_krw:,.0f} 원 (비중: {(total_stock_krw/total_asset_krw*100) if total_asset_krw else 0:.1f}%)
+* 총 자산: {total_asset_krw:,.0f} 원
+* 현금: {total_cash_krw:,.0f} 원 (비중: {(total_cash_krw/total_asset_krw*100) if total_asset_krw else 0:.1f}%)
+* 주식: {total_stock_krw:,.0f} 원 (비중: {(total_stock_krw/total_asset_krw*100) if total_asset_krw else 0:.1f}%)
 
-### 📈 [보유 종목 상세 현황] (수익률 순)
+### 📈 [보유 종목 현황]
 """
         sorted_stocks = sorted(final_stock_list, key=lambda x: (x['eval_krw']-x['buy_krw'])/x['buy_krw'] if x['buy_krw']>0 else 0, reverse=True)
         for s in sorted_stocks:
             p_pct = ((s['eval_krw']-s['buy_krw'])/s['buy_krw']*100) if s['buy_krw']>0 else 0
             wgt = (s['eval_krw']/total_asset_krw*100) if total_asset_krw>0 else 0
-            gemini_prompt += f"- [{s['owner']}] {s['name']} ({s['ticker']}): 비중 {wgt:.1f}%, 수익률 {p_pct:+.2f}%, 매입액 {s['buy_krw']:,.0f}원, 평가액 {s['eval_krw']:,.0f}원\n"
-
+            gemini_prompt += f"- {s['name']} ({s['ticker']}): 비중 {wgt:.1f}%, 수익률 {p_pct:+.2f}%, 평가액 {s['eval_krw']:,.0f}원\n"
         gemini_prompt += """
 ---
 ### 📝 [요청 사항]
-1. **자산 배분 평가:** 현금과 주식의 비율, 특정 종목(또는 국가)에 대한 쏠림 현상이 없는지 평가해 주세요.
-2. **리스크 진단:** 현재 포트폴리오에서 예상되는 위험 요소(환율, 금리, 개별 기업 리스크 등)는 무엇인지 짚어주세요.
-3. **맞춤형 리밸런싱 전략:** 수익을 극대화하고 리스크를 방어하기 위해 어떤 종목의 비중을 조절(매수/매도)하는 것이 좋을지, 또는 현금 비중을 어떻게 가져가야 할지 구체적으로 제안해 주세요.
-4. **부부 맞춤형 조언:** 부부가 함께 자산을 불려나가는 과정에서 필요한 따뜻하고 동기부여가 되는 조언을 마지막에 덧붙여 주세요. (전문적이지만 친절하고 이해하기 쉬운 톤 앤 매너를 유지해 주세요.)
+1. 자산 배분 적절성 평가 및 리스크 진단
+2. 수익 극대화를 위한 맞춤형 리밸런싱 전략 제안
+3. 부부를 위한 따뜻한 재테크 조언
 """
         st.code(gemini_prompt, language="markdown")

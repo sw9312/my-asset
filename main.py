@@ -9,18 +9,26 @@ import urllib.request
 import re
 
 # 📱 앱 설정
-st.set_page_config(page_title="성우 & 지영 자산관리 V5.8", layout="wide")
+st.set_page_config(page_title="성우 & 지영 자산관리 V5.9", layout="wide")
 
-# 🎨 디자인 스타일
+# 🎨 1, 2번 반영: 컬러 부활 및 반응형(모바일/PC) 디자인 적용
 st.markdown("""
 <style>
+    /* 화면 너비 제한 */
     .block-container { max-width: 1100px !important; padding-top: 2rem !important; }
+    
+    /* 기본 배경 */
     .stApp { background-color: #f2f4f6 !important; }
     
-    /* 모든 텍스트 강제 색상 고정 (모바일 하얀 글씨 증발 방지) */
-    p, span, div, h1, h2, h3, h4, h5, h6, label, li { color: #191f28 !important; }
+    /* 다크모드 방어용 텍스트 색상 (span과 div는 제외하여 색상 덮어쓰기 방지) */
+    .stMarkdown p, .stMarkdown h1, .stMarkdown h2, .stMarkdown h3, .stMarkdown h4, .stMarkdown li, label { color: #191f28 !important; }
+    
+    /* 컬러 클래스 강제 지정 */
+    .toss-red { color: #f04452 !important; }
+    .toss-blue { color: #3182f6 !important; }
+    .toss-black { color: #191f28 !important; }
 
-    /* 입력창 디자인 */
+    /* 입력창 및 셀렉트박스 스타일 */
     .stTextInput input, .stNumberInput input {
         background-color: #ffffff !important; border: 1px solid #c8d0d8 !important;
         border-radius: 8px !important; color: #191f28 !important;
@@ -33,6 +41,7 @@ st.markdown("""
         background-color: #ffffff !important; border: 1px solid #c8d0d8 !important; border-radius: 8px !important;
     }
     
+    /* 익스팬더 및 로그인 박스 */
     .st-expander {
         background-color: white !important; border-radius: 12px !important;
         border: 1px solid #e5e8eb !important; box-shadow: 0 2px 10px rgba(0,0,0,0.02) !important;
@@ -40,6 +49,20 @@ st.markdown("""
     .login-box {
         background-color: white; padding: 30px; border-radius: 20px; border: 1px solid #e5e8eb;
         box-shadow: 0 10px 30px rgba(0,0,0,0.05); max-width: 400px; margin: 0 auto;
+    }
+
+    /* 💡 반응형 UI 매직: 모바일과 PC 화면을 구분해서 보여줍니다! */
+    .mobile-card {
+        background-color: white; border-radius: 16px; padding: 16px; margin-bottom: 12px;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.03); border: 1px solid #e5e8eb;
+    }
+    @media (max-width: 768px) {
+        .desktop-view { display: none !important; }
+        .mobile-view { display: block !important; }
+    }
+    @media (min-width: 769px) {
+        .desktop-view { display: block !important; }
+        .mobile-view { display: none !important; }
     }
 </style>
 """, unsafe_allow_html=True)
@@ -52,7 +75,7 @@ if "logged_in" not in st.session_state:
 
 if not st.session_state["logged_in"]:
     st.markdown("<div class='login-box'>", unsafe_allow_html=True)
-    st.markdown("<h3 style='text-align: center;'>🔒 성우 & 지영 자산관리</h3>", unsafe_allow_html=True)
+    st.markdown("<h3 style='text-align: center; color: #191f28;'>🔒 성우 & 지영 자산관리</h3>", unsafe_allow_html=True)
     user_input = st.text_input("가족 비밀번호", type="password", placeholder="비밀번호를 입력하세요")
     if st.button("앱 열기", use_container_width=True):
         if user_input == FAMILY_PIN: st.session_state["logged_in"] = True; st.rerun()
@@ -127,15 +150,13 @@ else:
 
         t_to_try = [ticker.upper()]
         if clean_ticker.isdigit() and len(clean_ticker) == 6:
-            if "." not in ticker: 
-                t_to_try = [ticker + ".KS", ticker + ".KQ"]
+            if "." not in ticker: t_to_try = [ticker + ".KS", ticker + ".KQ"]
 
         for t in t_to_try:
             try:
                 stock = yf.Ticker(t)
                 hist = stock.history(period="1mo") 
                 if not hist.empty: hist = hist.dropna(subset=["Close"])
-                    
                 if not hist.empty:
                     curr = float(hist["Close"].iloc[-1])
                     prev = float(hist["Close"].iloc[-2]) if len(hist) >= 2 else curr
@@ -146,14 +167,14 @@ else:
     data = load_data()
     ex_rate = get_exchange_rate()
 
-    st.markdown("<h2 style='font-weight: 700;'>📊 통합 자산 포트폴리오</h2>", unsafe_allow_html=True)
+    st.markdown("<h2 style='color: #191f28; font-weight: 700;'>📊 통합 자산 포트폴리오</h2>", unsafe_allow_html=True)
     col_rate, col_logout = st.columns([5, 1])
     with col_rate: st.markdown(f"<span style='color: #8b95a1 !important;'>💱 실시간 환율: <b>1$ = {ex_rate:,.2f}원</b></span>", unsafe_allow_html=True)
     with col_logout:
         if st.button("🔒 로그아웃", use_container_width=True): st.session_state["logged_in"] = False; st.rerun()
 
     with st.expander("✏️ 자산 데이터 관리 (입력/수정)"):
-        tab1, tab2, tab3, tab4, tab5 = st.tabs(["💵 현금", "📈 주식 등록", "⚙️ 보유주식 수정", "📜 기록 관리", "💾 데이터 보관소"])
+        tab1, tab2, tab3, tab4, tab5 = st.tabs(["💵 현금", "📈 주식 등록", "⚙️ 보유주식 수정", "📜 기록 관리", "💾 백업"])
         
         with tab1:
             with st.form("cash_form", clear_on_submit=True):
@@ -212,12 +233,12 @@ else:
         
         with tab5:
             st.warning("데이터가 초기화되었을 때 아래 상자에 백업 텍스트를 넣고 복구를 누르세요.")
-            st.text_area("현재 내 데이터 (정기적으로 복사해서 카톡에 보관하세요!)", value=json.dumps(data, ensure_ascii=False), height=150)
+            st.text_area("현재 내 데이터 (복사 보관용)", value=json.dumps(data, ensure_ascii=False), height=100)
             restore_json = st.text_input("복구용 데이터 붙여넣기")
             if st.button("데이터 복구 실행"):
                 try:
                     data = json.loads(restore_json)
-                    save_data(data); st.success("성공적으로 복구되었습니다!"); st.rerun()
+                    save_data(data); st.success("복구 완료!"); st.rerun()
                 except: st.error("올바른 형식이 아닙니다.")
 
     st.divider()
@@ -269,27 +290,27 @@ else:
     total_asset_krw = total_cash_krw + total_stock_krw
     if total_cash_krw > 0: chart_data.append({"항목": "현금", "평가금액": total_cash_krw})
 
-    # 💡 1 & 2번 핵심 반영: 모바일에서 세로로 안 쌓이고, 글씨가 안 날아가는 커스텀 HTML 요약 카드!
+    # 요약 카드
     custom_metric_html = f"""
     <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 20px;">
         <div style="background-color: white; padding: 15px 10px; border-radius: 16px; box-shadow: 0 4px 15px rgba(0,0,0,0.03); text-align: center; border: 1px solid #f2f4f6;">
-            <div style="color: #8b95a1 !important; font-size: 13px; font-weight: 600; margin-bottom: 5px;">총 자산</div>
-            <div style="color: #191f28 !important; font-size: 18px; font-weight: 800;">{total_asset_krw/div:,.0f}<span style="font-size:14px; margin-left:2px;">{unit}</span></div>
+            <div style="color: #8b95a1; font-size: 13px; font-weight: 600; margin-bottom: 5px;">총 자산</div>
+            <div style="color: #191f28; font-size: 18px; font-weight: 800;">{total_asset_krw/div:,.0f}<span style="font-size:14px; margin-left:2px;">{unit}</span></div>
         </div>
         <div style="background-color: white; padding: 15px 10px; border-radius: 16px; box-shadow: 0 4px 15px rgba(0,0,0,0.03); text-align: center; border: 1px solid #f2f4f6;">
-            <div style="color: #8b95a1 !important; font-size: 13px; font-weight: 600; margin-bottom: 5px;">주식</div>
-            <div style="color: #191f28 !important; font-size: 18px; font-weight: 800;">{total_stock_krw/div:,.0f}<span style="font-size:14px; margin-left:2px;">{unit}</span></div>
+            <div style="color: #8b95a1; font-size: 13px; font-weight: 600; margin-bottom: 5px;">주식</div>
+            <div style="color: #191f28; font-size: 18px; font-weight: 800;">{total_stock_krw/div:,.0f}<span style="font-size:14px; margin-left:2px;">{unit}</span></div>
         </div>
         <div style="background-color: white; padding: 15px 10px; border-radius: 16px; box-shadow: 0 4px 15px rgba(0,0,0,0.03); text-align: center; border: 1px solid #f2f4f6;">
-            <div style="color: #8b95a1 !important; font-size: 13px; font-weight: 600; margin-bottom: 5px;">현금</div>
-            <div style="color: #191f28 !important; font-size: 18px; font-weight: 800;">{total_cash_krw/div:,.0f}<span style="font-size:14px; margin-left:2px;">{unit}</span></div>
+            <div style="color: #8b95a1; font-size: 13px; font-weight: 600; margin-bottom: 5px;">현금</div>
+            <div style="color: #191f28; font-size: 18px; font-weight: 800;">{total_cash_krw/div:,.0f}<span style="font-size:14px; margin-left:2px;">{unit}</span></div>
         </div>
     </div>
     """
     st.markdown(custom_metric_html, unsafe_allow_html=True)
     
     st.divider()
-    st.markdown("<h3>📈 자산 추이</h3>", unsafe_allow_html=True)
+    st.markdown("<h3 style='color: #191f28;'>📈 자산 추이</h3>", unsafe_allow_html=True)
     if st.button("현재 자산 누적 기록하기", use_container_width=True):
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         data["history"].append({"date": now_str, "total": int(total_asset_krw), "stock": int(total_stock_krw), "cash": int(total_cash_krw)})
@@ -300,32 +321,21 @@ else:
         val_div = 10000 if not is_usd_view else ex_rate
         h_df["총자산"], h_df["주식"], h_df["현금"] = h_df["total"]/val_div, h_df["stock"]/val_div, h_df["cash"]/val_div
         fig = px.line(h_df, x="date", y=["총자산", "주식", "현금"], markers=True)
-        # 💡 차트 글자색 강제 고정
         fig.update_layout(yaxis_title="만원" if not is_usd_view else "USD", legend_title="", plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', font=dict(color="#191f28"))
         st.plotly_chart(fig, use_container_width=True)
 
     if chart_data:
         st.divider()
-        st.markdown("<h3>🍩 포트폴리오 비중</h3>", unsafe_allow_html=True)
+        st.markdown("<h3 style='color: #191f28;'>🍩 포트폴리오 비중</h3>", unsafe_allow_html=True)
         fig_pie = px.pie(pd.DataFrame(chart_data), values="평가금액", names="항목", hole=0.45)
-        # 💡 파이 차트 글자색 강제 고정
         fig_pie.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', font=dict(color="#191f28"))
         st.plotly_chart(fig_pie, use_container_width=True)
 
-    # 테이블 그리기 함수 (최상단 합계 유지)
-    def draw_toss_table(df_list):
+    # 💡 1 & 2번 핵심: 반응형 테이블 (데스크탑은 표, 모바일은 카드 리스트)
+    def draw_responsive_table(df_list):
         if not df_list: 
-            st.markdown("<p style='color:#8b95a1 !important;'>보유 주식이 없습니다.</p>", unsafe_allow_html=True)
+            st.markdown("<p style='color:#8b95a1;'>보유 주식이 없습니다.</p>", unsafe_allow_html=True)
             return
-        
-        html = '<div style="overflow-x: auto; background-color: white; border-radius: 16px; padding: 10px 15px; box-shadow: 0 4px 20px rgba(0,0,0,0.03); margin-bottom: 25px;">'
-        html += '<table style="border-collapse: collapse; font-size: 14px; color: #191f28; white-space: nowrap; width: 100%;">'
-        html += '<thead><tr style="border-bottom: 1px solid #e5e8eb;">'
-        cols = ["소유", "종목명", "수량", "현재가<br>(평단가)", "평가금액<br>(매입금액)", "평가손익<br>(수익률)", "전일대비", "비고"]
-        for c in cols: 
-            align = "center" if c in ['소유', '수량'] else "left" if c in ['종목명', '비고'] else "right"
-            html += f'<th style="padding: 10px 15px; text-align: {align}; color: #8b95a1 !important; font-weight: 500; font-size: 13px;">{c}</th>'
-        html += '</tr></thead><tbody>'
         
         total_buy = sum(r['buy_krw'] for r in df_list)
         total_eval = sum(r['eval_krw'] for r in df_list)
@@ -333,40 +343,109 @@ else:
         total_p_pct = (total_profit / total_buy * 100) if total_buy > 0 else 0
         total_d_chg = sum(r['d_chg'] for r in df_list)
         
-        tp_clr = '#f04452' if total_profit > 0 else '#3182f6' if total_profit < 0 else '#191f28'
-        tc_clr = '#f04452' if total_d_chg > 0 else '#3182f6' if total_d_chg < 0 else '#191f28'
+        tp_clr = 'toss-red' if total_profit > 0 else 'toss-blue' if total_profit < 0 else 'toss-black'
+        tc_clr = 'toss-red' if total_d_chg > 0 else 'toss-blue' if total_d_chg < 0 else 'toss-black'
+
+        # ----------------- 🖥️ 데스크탑용 테이블 뷰 -----------------
+        desk_html = '<div class="desktop-view" style="overflow-x: auto; background-color: white; border-radius: 16px; padding: 10px 15px; box-shadow: 0 4px 20px rgba(0,0,0,0.03); margin-bottom: 25px;">'
+        desk_html += '<table style="border-collapse: collapse; font-size: 14px; color: #191f28; white-space: nowrap; width: 100%;">'
+        desk_html += '<thead><tr style="border-bottom: 1px solid #e5e8eb;">'
+        cols = ["소유", "종목명", "수량", "현재가<br>(평단가)", "평가금액<br>(매입금액)", "평가손익<br>(수익률)", "전일대비", "비고"]
+        for c in cols: 
+            align = "center" if c in ['소유', '수량'] else "left" if c in ['종목명', '비고'] else "right"
+            desk_html += f'<th style="padding: 10px 15px; text-align: {align}; color: #8b95a1; font-weight: 500; font-size: 13px;">{c}</th>'
+        desk_html += '</tr></thead><tbody>'
         
-        html += f'''<tr style="background-color: #f9fafb; border-bottom: 2px solid #e5e8eb;">
-            <td colspan="4" style="padding: 12px 15px; text-align: center; font-weight: 800; color: #191f28 !important;">합 계</td>
-            <td style="padding: 12px 15px; text-align: right; font-weight: 800; color: #191f28 !important;">{total_eval/div:,.1f}{unit}<br><span style="font-size:12px; color: #8b95a1 !important; font-weight:600;">({total_buy/div:,.1f}{unit})</span></td>
-            <td style="padding: 12px 15px; text-align: right; color: {tp_clr} !important; font-weight: 800;">{total_profit/div:,.1f}{unit}<br><span style="font-size:12px;">({total_p_pct:+.2f}%)</span></td>
-            <td style="padding: 12px 15px; text-align: right; color: {tc_clr} !important; font-weight: 800;">{total_d_chg:,.1f}{unit}</td>
+        # 데스크탑 합계
+        desk_html += f'''<tr style="background-color: #f9fafb; border-bottom: 2px solid #e5e8eb;">
+            <td colspan="4" style="padding: 12px 15px; text-align: center; font-weight: 800; color: #191f28;">합 계</td>
+            <td style="padding: 12px 15px; text-align: right; font-weight: 800; color: #191f28;">{total_eval/div:,.1f}{unit}<br><span style="font-size:12px; color: #8b95a1; font-weight:600;">({total_buy/div:,.1f}{unit})</span></td>
+            <td style="padding: 12px 15px; text-align: right; font-weight: 800;" class="{tp_clr}">{total_profit/div:,.1f}{unit}<br><span style="font-size:12px;">({total_p_pct:+.2f}%)</span></td>
+            <td style="padding: 12px 15px; text-align: right; font-weight: 800;" class="{tc_clr}">{total_d_chg:,.1f}{unit}</td>
             <td style="padding: 12px 15px;"></td>
         </tr>'''
         
         for r in df_list:
             profit = r['eval_krw'] - r['buy_krw']
             p_pct = (profit / r['buy_krw'] * 100) if r['buy_krw'] > 0 else 0
-            p_clr = '#f04452' if profit > 0 else '#3182f6' if profit < 0 else '#191f28'
-            c_clr = '#f04452' if r['d_chg'] > 0 else '#3182f6' if r['d_chg'] < 0 else '#191f28'
+            p_clr = 'toss-red' if profit > 0 else 'toss-blue' if profit < 0 else 'toss-black'
+            c_clr = 'toss-red' if r['d_chg'] > 0 else 'toss-blue' if r['d_chg'] < 0 else 'toss-black'
             
-            html += f'''<tr style="border-bottom: 1px solid #f2f4f6;">
-                <td style="padding: 12px 15px; text-align: center; font-weight: 600; color: #191f28 !important;">{r['owner']}</td>
-                <td style="padding: 12px 15px; text-align: left; font-weight: 600; color: #191f28 !important;">{r['name']}<br><span style="font-size:12px; color: #8b95a1 !important; font-weight:400;">{r['ticker']}</span></td>
-                <td style="padding: 12px 15px; text-align: center; font-weight: 500; color: #191f28 !important;">{int(r['qty'])}</td>
-                <td style="padding: 12px 15px; text-align: right; font-weight: 500; color: #191f28 !important;">{r['curr_p']:,.1f}<br><span style="font-size:12px; color: #8b95a1 !important;">({r['avg_p']:,.1f})</span></td>
-                <td style="padding: 12px 15px; text-align: right; font-weight: 500; color: #191f28 !important;">{r['eval_krw']/div:,.1f}{unit}<br><span style="font-size:12px; color: #8b95a1 !important;">({r['buy_krw']/div:,.1f}{unit})</span></td>
-                <td style="padding: 12px 15px; text-align: right; color: {p_clr} !important; font-weight: 700;">{profit/div:,.1f}{unit}<br><span style="font-size:12px;">({p_pct:+.2f}%)</span></td>
-                <td style="padding: 12px 15px; text-align: right; color: {c_clr} !important; font-weight: 700;">{r['d_chg']:,.1f}{unit}<br><span style="font-size:12px;">({r['d_pct']:+.2f}%)</span></td>
-                <td style="padding: 12px 15px; text-align: left; font-size: 13px; color: #8b95a1 !important;">{r['remarks']}</td>
+            desk_html += f'''<tr style="border-bottom: 1px solid #f2f4f6;">
+                <td style="padding: 12px 15px; text-align: center; font-weight: 600; color: #191f28;">{r['owner']}</td>
+                <td style="padding: 12px 15px; text-align: left; font-weight: 600; color: #191f28;">{r['name']}<br><span style="font-size:12px; color: #8b95a1; font-weight:400;">{r['ticker']}</span></td>
+                <td style="padding: 12px 15px; text-align: center; font-weight: 500; color: #191f28;">{int(r['qty'])}</td>
+                <td style="padding: 12px 15px; text-align: right; font-weight: 500; color: #191f28;">{r['curr_p']:,.1f}<br><span style="font-size:12px; color: #8b95a1;">({r['avg_p']:,.1f})</span></td>
+                <td style="padding: 12px 15px; text-align: right; font-weight: 500; color: #191f28;">{r['eval_krw']/div:,.1f}{unit}<br><span style="font-size:12px; color: #8b95a1;">({r['buy_krw']/div:,.1f}{unit})</span></td>
+                <td style="padding: 12px 15px; text-align: right; font-weight: 700;" class="{p_clr}">{profit/div:,.1f}{unit}<br><span style="font-size:12px;">({p_pct:+.2f}%)</span></td>
+                <td style="padding: 12px 15px; text-align: right; font-weight: 700;" class="{c_clr}">{r['d_chg']:,.1f}{unit}<br><span style="font-size:12px;">({r['d_pct']:+.2f}%)</span></td>
+                <td style="padding: 12px 15px; text-align: left; font-size: 13px; color: #8b95a1;">{r['remarks']}</td>
             </tr>'''
-        html += '</tbody></table></div>'
-        st.markdown(html, unsafe_allow_html=True)
+        desk_html += '</tbody></table></div>'
 
-    st.markdown("<h3>🇰🇷 국내 주식</h3>", unsafe_allow_html=True)
-    draw_toss_table([x for x in final_stock_list if not x['ticker'].isalpha()])
-    st.markdown("<h3>🇺🇸 해외 주식</h3>", unsafe_allow_html=True)
-    draw_toss_table([x for x in final_stock_list if x['ticker'].isalpha()])
+        # ----------------- 📱 모바일용 카드 리스트 뷰 -----------------
+        mob_html = '<div class="mobile-view">'
+        
+        # 모바일 합계 카드
+        mob_html += f'''
+        <div class="mobile-card" style="background-color: #f9fafb; border: 2px solid #e5e8eb;">
+            <div style="text-align: center; font-weight: 800; font-size: 16px; color: #191f28; margin-bottom: 12px;">💎 총 합계 💎</div>
+            <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
+                <span style="color: #8b95a1; font-size: 13px;">총 평가금액(매입금액)</span>
+                <span style="font-weight: 800; font-size: 14px; color: #191f28;">{total_eval/div:,.1f}{unit} <span style="font-size: 12px; color: #8b95a1; font-weight:normal;">({total_buy/div:,.1f}{unit})</span></span>
+            </div>
+            <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
+                <span style="color: #8b95a1; font-size: 13px;">총 평가손익(수익률)</span>
+                <span style="font-weight: 800; font-size: 14px;" class="{tp_clr}">{total_profit/div:,.1f}{unit} ({total_p_pct:+.2f}%)</span>
+            </div>
+            <div style="display: flex; justify-content: space-between;">
+                <span style="color: #8b95a1; font-size: 13px;">총 전일대비</span>
+                <span style="font-weight: 800; font-size: 14px;" class="{tc_clr}">{total_d_chg:,.1f}{unit}</span>
+            </div>
+        </div>
+        '''
+
+        # 모바일 개별 종목 카드
+        for r in df_list:
+            profit = r['eval_krw'] - r['buy_krw']
+            p_pct = (profit / r['buy_krw'] * 100) if r['buy_krw'] > 0 else 0
+            p_clr = 'toss-red' if profit > 0 else 'toss-blue' if profit < 0 else 'toss-black'
+            c_clr = 'toss-red' if r['d_chg'] > 0 else 'toss-blue' if r['d_chg'] < 0 else 'toss-black'
+            
+            mob_html += f'''
+            <div class="mobile-card">
+                <div style="display: flex; justify-content: space-between; border-bottom: 1px solid #f2f4f6; padding-bottom: 10px; margin-bottom: 10px;">
+                    <div style="font-weight: 700; font-size: 15px; color: #191f28;">[{r['owner']}] {r['name']} <br><span style="font-size: 12px; color: #8b95a1; font-weight: normal;">{r['ticker']}</span></div>
+                    <div style="font-size: 13px; color: #191f28; font-weight: 600;">{int(r['qty'])}주</div>
+                </div>
+                <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
+                    <span style="color: #8b95a1; font-size: 13px;">현재가(평단가)</span>
+                    <span style="font-weight: 600; font-size: 14px; color: #191f28;">{r['curr_p']:,.1f} <span style="font-size: 12px; color: #8b95a1; font-weight:normal;">({r['avg_p']:,.1f})</span></span>
+                </div>
+                <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
+                    <span style="color: #8b95a1; font-size: 13px;">평가금액(매입)</span>
+                    <span style="font-weight: 600; font-size: 14px; color: #191f28;">{r['eval_krw']/div:,.1f}{unit} <span style="font-size: 12px; color: #8b95a1; font-weight:normal;">({r['buy_krw']/div:,.1f}{unit})</span></span>
+                </div>
+                <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
+                    <span style="color: #8b95a1; font-size: 13px;">평가손익(수익률)</span>
+                    <span style="font-weight: 700; font-size: 14px;" class="{p_clr}">{profit/div:,.1f}{unit} ({p_pct:+.2f}%)</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                    <span style="color: #8b95a1; font-size: 13px;">전일대비</span>
+                    <span style="font-weight: 700; font-size: 14px;" class="{c_clr}">{r['d_chg']:,.1f}{unit} ({r['d_pct']:+.2f}%)</span>
+                </div>
+                <div style="font-size: 12px; color: #8b95a1; text-align: right; background-color: #f9fafb; padding: 6px; border-radius: 6px;">{r['remarks']}</div>
+            </div>
+            '''
+        mob_html += '</div>'
+
+        # 두 가지 뷰를 동시에 렌더링 (CSS 미디어 쿼리가 화면 크기에 맞춰 알아서 하나만 보여줌)
+        st.markdown(desk_html + mob_html, unsafe_allow_html=True)
+
+    st.markdown("<h3 style='color:#191f28;'>🇰🇷 국내 주식</h3>", unsafe_allow_html=True)
+    draw_responsive_table([x for x in final_stock_list if not x['ticker'].isalpha()])
+    st.markdown("<h3 style='color:#191f28;'>🇺🇸 해외 주식</h3>", unsafe_allow_html=True)
+    draw_responsive_table([x for x in final_stock_list if x['ticker'].isalpha()])
 
     st.divider()
     with st.expander("🤖 AI 프라이빗 뱅커에게 분석 요청하기", expanded=False):

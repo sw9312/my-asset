@@ -68,7 +68,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ---------------- 보안 및 데이터 설정 ----------------
-FAMILY_PIN = "1204" # 💡 3번 반영: 비밀번호 1204로 변경 완료
+FAMILY_PIN = "1210" # 💡 3번 반영: 비밀번호 1210로 변경 완료
 
 if "logged_in" not in st.session_state:
     st.session_state["logged_in"] = False

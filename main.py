@@ -7,33 +7,65 @@ import plotly.express as px
 from datetime import datetime
 
 # 📱 앱 설정
-st.set_page_config(page_title="성우 & 지영 자산관리 V5.2", layout="wide")
+st.set_page_config(page_title="성우 & 지영 자산관리 V5.3", layout="wide")
 
-# 🎨 1, 2번 반영: 모바일 시인성 및 로그인창 디자인 강화
+# 🎨 4번 반영: 입력창 시인성 및 전체 UI 디자인 대폭 개선
 st.markdown("""
 <style>
-    /* 전체 배경색 강제 고정 (모바일 하얀 배경 방지) */
+    /* 전체 배경 및 텍스트 기본색 */
     .stApp { 
         background-color: #f2f4f6 !important; 
         color: #333d4b !important;
     }
-    /* 메트릭 카드 및 섹션 디자인 */
+    
+    /* 💡 입력창(텍스트, 숫자) 테두리 및 배경색 뚜렷하게 강조 */
+    .stTextInput input, .stNumberInput input {
+        background-color: #ffffff !important;
+        border: 1px solid #c8d0d8 !important;
+        border-radius: 8px !important;
+        color: #191f28 !important;
+        padding: 10px 12px !important;
+        box-shadow: inset 0 1px 2px rgba(0,0,0,0.02);
+    }
+    .stTextInput input:focus, .stNumberInput input:focus {
+        border-color: #3182f6 !important;
+        box-shadow: 0 0 0 2px rgba(49,130,246,0.2) !important;
+    }
+    
+    /* 💡 셀렉트박스 테두리 강조 */
+    div[data-baseweb="select"] > div {
+        background-color: #ffffff !important;
+        border: 1px solid #c8d0d8 !important;
+        border-radius: 8px !important;
+    }
+
+    /* 요약 카드 디자인 */
     div[data-testid="metric-container"] {
         background-color: white;
         padding: 20px;
         border-radius: 16px;
-        box-shadow: 0 4px 20px rgba(0,0,0,0.05);
+        box-shadow: 0 4px 20px rgba(0,0,0,0.04);
+        border: 1px solid #f2f4f6;
     }
-    /* 로그인 박스 스타일 */
+    
+    /* 아코디언(Expander) 박스 디자인 */
+    .st-expander {
+        background-color: white !important;
+        border-radius: 12px !important;
+        border: 1px solid #e5e8eb !important;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.02) !important;
+    }
+    
+    /* 비밀번호 로그인 박스 */
     .login-box {
         background-color: white;
         padding: 30px;
         border-radius: 20px;
-        border: 2px solid #e5e8eb;
-        box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+        border: 1px solid #e5e8eb;
+        box-shadow: 0 10px 30px rgba(0,0,0,0.05);
+        max-width: 400px;
+        margin: 0 auto;
     }
-    /* 텍스트 색상 보정 */
-    p, span, label { color: #333d4b !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -45,8 +77,8 @@ if "logged_in" not in st.session_state:
 
 if not st.session_state["logged_in"]:
     st.markdown("<div class='login-box'>", unsafe_allow_html=True)
-    st.markdown("### 🔒 성우 & 지영 자산관리")
-    user_input = st.text_input("가족 비밀번호를 입력하세요", type="password", help="배경과 구분되도록 테두리를 강화했습니다.")
+    st.markdown("<h3 style='text-align: center; color: #191f28;'>🔒 성우 & 지영 자산관리</h3>", unsafe_allow_html=True)
+    user_input = st.text_input("가족 비밀번호", type="password", placeholder="비밀번호를 입력하세요")
     if st.button("앱 열기", use_container_width=True):
         if user_input == FAMILY_PIN: 
             st.session_state["logged_in"] = True
@@ -54,14 +86,34 @@ if not st.session_state["logged_in"]:
         else: st.error("비밀번호가 틀렸습니다.")
     st.markdown("</div>", unsafe_allow_html=True)
 else:
-    # 데이터 파일 경로 (스트림릿 클라우드는 재배포 시 이 파일이 초기화될 수 있음)
     DATA_FILE = "family_finance_data_v2.json"
+
+    KOR_NAMES = {
+        "005930": "삼성전자", "000660": "SK하이닉스", "373220": "LG에너지솔루션", 
+        "207940": "삼성바이오로직스", "005380": "현대차", "000270": "기아", "068270": "셀트리온", 
+        "005490": "POSCO홀딩스", "035420": "NAVER", "035720": "카카오", "005935": "삼성전자우"
+    }
+    USA_NAMES = {
+        "AAPL": "애플", "MSFT": "마이크로소프트", "NVDA": "엔비디아", "TSLA": "테슬라",
+        "AMZN": "아마존", "META": "메타 플랫폼스", "GOOGL": "알파벳 A", "MU": "마이크론",
+        "PLTR": "팔란티어", "CPNG": "쿠팡", "ORCL": "오라클", "OXY": "옥시덴탈", "AMR": "알파 메탈러지컬", "BKSY": "블랙스카이"
+    }
 
     def load_data():
         if os.path.exists(DATA_FILE):
             try:
                 with open(DATA_FILE, "r", encoding="utf-8") as f:
-                    return json.load(f)
+                    d = json.load(f)
+                    if "cash" in d and "cash_list" not in d:
+                        d["cash_list"] = [{"owner": k, "label": "현금", "amount": v, "currency": "KRW(원)"} for k, v in d["cash"].items()]
+                        del d["cash"]
+                    for c in d.get("cash_list", []):
+                        if "currency" not in c: c["currency"] = "KRW(원)"
+                    if "history" not in d: d["history"] = []
+                    for s in d.get("stocks", []):
+                        if "name" not in s: s["name"] = ""
+                        if "note" not in s: s["note"] = ""
+                    return d
             except: pass
         return {"cash_list": [], "stocks": [], "history": []}
 
@@ -71,45 +123,61 @@ else:
 
     @st.cache_data(ttl=600)
     def get_exchange_rate():
-        # 💡 3번 반영: 환율 로직 보강 (여러 코드 시도)
         for ticker in ["USDKRW=X", "KRW=X"]:
             try:
                 rate = yf.Ticker(ticker).history(period="1d")["Close"].iloc[-1]
                 if rate > 1000: return rate
             except: continue
-        return 1380.0 # 모든 시도 실패 시 최근 평균 환율로 백업
+        return 1380.0
 
     @st.cache_data(ttl=3600)
     def get_stock_data(ticker):
+        # 💡 1, 2번 반영: 에러 방어력 극대화 로직
+        clean_ticker = ticker.upper().split('.')[0]
+        fallback_name = KOR_NAMES.get(clean_ticker) or USA_NAMES.get(clean_ticker) or clean_ticker
+        
         t_to_try = [ticker.upper()]
-        if ticker.isdigit() and len(ticker) == 6:
-            t_to_try = [ticker + ".KS", ticker + ".KQ"]
+        # 한국 주식 코드(6자리 숫자)일 경우 .KS, .KQ 자동 추가
+        if clean_ticker.isdigit() and len(clean_ticker) == 6:
+            if "." not in ticker: 
+                t_to_try = [ticker + ".KS", ticker + ".KQ"]
+        
         for t in t_to_try:
             try:
                 stock = yf.Ticker(t)
-                hist = stock.history(period="5d")
+                # 💡 주말/공휴일 예외를 피하기 위해 기간을 1달(1mo)로 넉넉하게 잡음
+                hist = stock.history(period="1mo") 
+                
                 if not hist.empty:
-                    info = stock.info
-                    real_name = info.get('shortName') or info.get('longName') or ticker.split('.')[0]
-                    curr = hist["Close"].iloc[-1]
-                    prev = hist["Close"].iloc[-2] if len(hist) >= 2 else curr
+                    curr = float(hist["Close"].iloc[-1])
+                    prev = float(hist["Close"].iloc[-2]) if len(hist) >= 2 else curr
+                    
+                    real_name = fallback_name
+                    # 💡 주식 이름을 가져오다 에러가 나도, 가격(curr)은 무조건 반환하도록 분리!
+                    try:
+                        info = stock.info
+                        if info and ('shortName' in info or 'longName' in info):
+                            real_name = info.get('shortName') or info.get('longName') or fallback_name
+                    except: pass # 이름 가져오기 실패해도 무시
+                    
                     return curr, curr - prev, (curr - prev) / prev * 100, real_name
             except: continue
-        return 0.0, 0.0, 0.0, ticker
+            
+        return 0.0, 0.0, 0.0, fallback_name
 
     data = load_data()
     ex_rate = get_exchange_rate()
 
     # 상단 헤더
-    st.markdown("## 📊 통합 자산 포트폴리오")
+    st.markdown("<h2 style='color: #191f28; font-weight: 700;'>📊 통합 자산 포트폴리오</h2>", unsafe_allow_html=True)
     col_rate, col_logout = st.columns([5, 1])
-    with col_rate: st.caption(f"💱 실시간 환율: **1$ = {ex_rate:,.2f}원**")
+    with col_rate: st.markdown(f"<span style='color: #8b95a1;'>💱 실시간 환율: <b>1$ = {ex_rate:,.2f}원</b></span>", unsafe_allow_html=True)
     with col_logout:
-        if st.button("🔒 로그아웃"): st.session_state["logged_in"] = False; st.rerun()
+        if st.button("🔒 로그아웃", use_container_width=True): st.session_state["logged_in"] = False; st.rerun()
 
-    # 데이터 입력 및 관리
+    # 데이터 관리 영역
     with st.expander("✏️ 자산 데이터 관리 (입력/수정)"):
-        tab1, tab2, tab3, tab4, tab5 = st.tabs(["💵 현금", "📈 주식 등록", "⚙️ 보유주식 수정", "📜 기록 관리", "💾 데이터 백업/복구"])
+        tab1, tab2, tab3, tab4, tab5 = st.tabs(["💵 현금", "📈 주식 등록", "⚙️ 보유주식 수정", "📜 기록 관리", "💾 데이터 보관소"])
         
         with tab1:
             with st.form("cash_form", clear_on_submit=True):
@@ -125,8 +193,8 @@ else:
             st.write("---")
             for i, c in enumerate(data.get("cash_list", [])):
                 unit_label = "$" if "USD" in c['currency'] else "원"
-                with st.expander(f"{c['owner']} - {c['label']} ({c['amount']:,}{unit_label})"):
-                    new_amt = st.number_input("수정액", value=float(c['amount']), key=f"ce_{i}")
+                with st.expander(f"[{c['owner']}] {c['label']} ({c['amount']:,}{unit_label})"):
+                    new_amt = st.number_input("금액 수정", value=float(c['amount']), key=f"ce_{i}")
                     c_btn1, c_btn2 = st.columns(2)
                     if c_btn1.button("수정", key=f"cb_{i}"): data["cash_list"][i]['amount'] = new_amt; save_data(data); st.rerun()
                     if c_btn2.button("삭제", key=f"cd_{i}"): data["cash_list"].pop(i); save_data(data); st.rerun()
@@ -152,8 +220,10 @@ else:
                     
         with tab3:
             for i, s in enumerate(data["stocks"]):
-                with st.expander(f"[{s['owner']}] {s.get('name', s['ticker'])} ({s['broker']})"):
-                    new_n = st.text_input("종목명 지정", value=s.get('name', ''), key=f"en_{i}")
+                # 💡 3번 반영: 이름이 비어있으면 코드를 대신 띄워줌 (오류 방지)
+                display_name = s.get('name') if s.get('name') else s['ticker']
+                with st.expander(f"[{s['owner']}] {display_name} ({s['broker']})"):
+                    new_n = st.text_input("종목명 강제지정", value=s.get('name', ''), key=f"en_{i}", placeholder="비워두면 자동 검색됩니다")
                     new_q = st.number_input("수량", value=float(s['qty']), key=f"eq_{i}")
                     new_a = st.number_input("평단가", value=float(s['avg_price']), key=f"ea_{i}")
                     new_note = st.text_input("비고", value=s.get('note', ''), key=f"nt_{i}")
@@ -169,19 +239,18 @@ else:
                 if col_h2.button("삭제", key=f"hdel_{i}"): data["history"].pop(i); save_data(data); st.rerun()
         
         with tab5:
-            # 💡 4번 반영: 클라우드 서버 초기화에 대비한 수동 백업/복구 기능
-            st.warning("스트림릿 클라우드는 앱 업데이트 시 데이터 파일이 초기화될 수 있습니다. 아래 텍스트를 메모장에 복사해두시면 언제든 복구 가능합니다.")
-            st.text_area("현재 데이터 (복사하여 보관)", value=json.dumps(data, ensure_ascii=False), height=200)
-            restore_json = st.text_input("복구할 데이터 붙여넣기")
+            st.warning("데이터가 초기화되었을 때 아래 상자에 백업 텍스트를 넣고 복구를 누르세요.")
+            st.text_area("현재 내 데이터 (정기적으로 복사해서 카톡에 보관하세요!)", value=json.dumps(data, ensure_ascii=False), height=150)
+            restore_json = st.text_input("복구용 데이터 붙여넣기")
             if st.button("데이터 복구 실행"):
                 try:
                     data = json.loads(restore_json)
-                    save_data(data); st.success("데이터가 성공적으로 복구되었습니다!"); st.rerun()
-                except: st.error("올바른 데이터 형식이 아닙니다.")
+                    save_data(data); st.success("성공적으로 복구되었습니다!"); st.rerun()
+                except: st.error("올바른 형식이 아닙니다.")
 
     st.divider()
     
-    # 계산 로직
+    # 계산 및 통합 로직
     view_currency = st.radio("💰 통화 기준", ["원화(KRW)", "달러(USD)"], horizontal=True)
     is_usd_view = view_currency == "달러(USD)"
     unit, div = ("$", ex_rate) if is_usd_view else ("원", 1)
@@ -212,9 +281,11 @@ else:
         final_name = p['name_override'] if p['name_override'] else web_name
         eval_krw = p['qty'] * curr_p * (ex_rate if p['is_overseas'] else 1)
         total_stock_krw += eval_krw
+        
         avg_p_view = (p['total_buy_krw'] / p['qty']) / (ex_rate if is_usd_view else 1) if p['qty'] > 0 else 0
         curr_p_view = curr_p if p['is_overseas'] else curr_p / (ex_rate if is_usd_view else 1)
         d_chg_view = (d_chg * p['qty'] * (ex_rate if p['is_overseas'] else 1)) / div
+
         final_stock_list.append({
             "owner": p['owner'], "name": final_name, "ticker": p['ticker'],
             "qty": p['qty'], "buy_krw": p['total_buy_krw'], "eval_krw": eval_krw,
@@ -227,15 +298,15 @@ else:
     total_asset_krw = total_cash_krw + total_stock_krw
     if total_cash_krw > 0: chart_data.append({"항목": "현금", "평가금액": total_cash_krw})
 
-    # 요약 메트릭
+    # 메트릭 카드
     c1, c2, c3 = st.columns(3)
     c1.metric("총 자산", f"{total_asset_krw/div:,.0f}{unit}")
     c2.metric("주식", f"{total_stock_krw/div:,.0f}{unit}")
     c3.metric("현금", f"{total_cash_krw/div:,.0f}{unit}")
     
     st.divider()
-    st.subheader("📈 자산 추이")
-    if st.button("현재 자산 누적 기록하기"):
+    st.markdown("<h3 style='color:#191f28;'>📈 자산 추이</h3>", unsafe_allow_html=True)
+    if st.button("현재 자산 누적 기록하기", use_container_width=True):
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         data["history"].append({"date": now_str, "total": int(total_asset_krw), "stock": int(total_stock_krw), "cash": int(total_cash_krw)})
         save_data(data); st.rerun()
@@ -245,49 +316,62 @@ else:
         val_div = 10000 if not is_usd_view else ex_rate
         h_df["총자산"], h_df["주식"], h_df["현금"] = h_df["total"]/val_div, h_df["stock"]/val_div, h_df["cash"]/val_div
         fig = px.line(h_df, x="date", y=["총자산", "주식", "현금"], markers=True)
-        fig.update_layout(yaxis_title="만원" if not is_usd_view else "USD", legend_title="")
+        fig.update_layout(
+            yaxis_title="만원" if not is_usd_view else "USD", 
+            legend_title="", 
+            plot_bgcolor='rgba(0,0,0,0)', 
+            paper_bgcolor='rgba(0,0,0,0)'
+        )
         st.plotly_chart(fig, use_container_width=True)
 
     # 비중 차트
     if chart_data:
-        st.subheader("🍩 비중")
-        st.plotly_chart(px.pie(pd.DataFrame(chart_data), values="평가금액", names="항목", hole=0.45), use_container_width=True)
+        st.divider()
+        st.markdown("<h3 style='color:#191f28;'>🍩 포트폴리오 비중</h3>", unsafe_allow_html=True)
+        fig_pie = px.pie(pd.DataFrame(chart_data), values="평가금액", names="항목", hole=0.45)
+        fig_pie.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
+        st.plotly_chart(fig_pie, use_container_width=True)
 
-    # 토스 스타일 표
+    # 테이블 그리기 함수
     def draw_toss_table(df_list):
-        if not df_list: st.caption("보유 주식이 없습니다."); return
-        html = '<div style="overflow-x: auto; background-color: white; border-radius: 16px; padding: 10px; box-shadow: 0 4px 20px rgba(0,0,0,0.03); margin-bottom: 20px;">'
-        html += '<table style="border-collapse: collapse; width: 100%; font-size: 14px; color: #333d4b;">'
+        if not df_list: 
+            st.markdown("<p style='color:#8b95a1;'>보유 주식이 없습니다.</p>", unsafe_allow_html=True)
+            return
+        
+        html = '<div style="overflow-x: auto; background-color: white; border-radius: 16px; padding: 15px; box-shadow: 0 4px 20px rgba(0,0,0,0.03); margin-bottom: 25px;">'
+        html += '<table style="border-collapse: collapse; width: 100%; font-size: 14px; color: #191f28;">'
         html += '<thead><tr style="border-bottom: 1px solid #e5e8eb;">'
         cols = ["소유", "종목명", "수량", "현재가<br>(평단가)", "평가금액<br>(매입금액)", "평가손익<br>(수익률)", "전일대비", "비고"]
         for c in cols: 
             align = "center" if c in ['소유', '수량'] else "left" if c in ['종목명', '비고'] else "right"
-            html += f'<th style="padding: 12px 8px; text-align: {align}; color: #8b95a1; font-weight: 500; font-size: 13px;">{c}</th>'
+            html += f'<th style="padding: 12px 10px; text-align: {align}; color: #8b95a1; font-weight: 500; font-size: 13px;">{c}</th>'
         html += '</tr></thead><tbody>'
+        
         for r in df_list:
             profit = r['eval_krw'] - r['buy_krw']
             p_pct = (profit / r['buy_krw'] * 100) if r['buy_krw'] > 0 else 0
-            p_clr = '#f04452' if profit > 0 else '#3182f6' if profit < 0 else '#333d4b'
-            c_clr = '#f04452' if r['d_chg'] > 0 else '#3182f6' if r['d_chg'] < 0 else '#333d4b'
+            p_clr = '#f04452' if profit > 0 else '#3182f6' if profit < 0 else '#191f28'
+            c_clr = '#f04452' if r['d_chg'] > 0 else '#3182f6' if r['d_chg'] < 0 else '#191f28'
+            
             html += f'''<tr style="border-bottom: 1px solid #f2f4f6;">
-                <td style="padding: 14px 8px; text-align: center; font-weight: 600;">{r['owner']}</td>
-                <td style="padding: 14px 8px; text-align: left; font-weight: 600;">{r['name']}<br><span style="font-size:12px; color: #8b95a1; font-weight:400;">{r['ticker']}</span></td>
-                <td style="padding: 14px 8px; text-align: center;">{int(r['qty'])}</td>
-                <td style="padding: 14px 8px; text-align: right;">{r['curr_p']:,.1f}<br><span style="font-size:12px; color: #8b95a1;">({r['avg_p']:,.1f})</span></td>
-                <td style="padding: 14px 8px; text-align: right;">{r['eval_krw']/div:,.1f}{unit}<br><span style="font-size:12px; color: #8b95a1;">({r['buy_krw']/div:,.1f}{unit})</span></td>
-                <td style="padding: 14px 8px; text-align: right; color: {p_clr}; font-weight: 600;">{profit/div:,.1f}{unit}<br><span style="font-size:12px;">({p_pct:+.2f}%)</span></td>
-                <td style="padding: 14px 8px; text-align: right; color: {c_clr}; font-weight: 600;">{r['d_chg']:,.1f}{unit}<br><span style="font-size:12px;">({r['d_pct']:+.2f}%)</span></td>
-                <td style="padding: 14px 8px; text-align: left; font-size: 12px; color: #8b95a1;">{r['remarks']}</td>
+                <td style="padding: 16px 10px; text-align: center; font-weight: 600;">{r['owner']}</td>
+                <td style="padding: 16px 10px; text-align: left; font-weight: 600;">{r['name']}<br><span style="font-size:12px; color: #8b95a1; font-weight:400;">{r['ticker']}</span></td>
+                <td style="padding: 16px 10px; text-align: center; font-weight: 500;">{int(r['qty'])}</td>
+                <td style="padding: 16px 10px; text-align: right; font-weight: 500;">{r['curr_p']:,.1f}<br><span style="font-size:12px; color: #8b95a1;">({r['avg_p']:,.1f})</span></td>
+                <td style="padding: 16px 10px; text-align: right; font-weight: 500;">{r['eval_krw']/div:,.1f}{unit}<br><span style="font-size:12px; color: #8b95a1;">({r['buy_krw']/div:,.1f}{unit})</span></td>
+                <td style="padding: 16px 10px; text-align: right; color: {p_clr}; font-weight: 700;">{profit/div:,.1f}{unit}<br><span style="font-size:12px;">({p_pct:+.2f}%)</span></td>
+                <td style="padding: 16px 10px; text-align: right; color: {c_clr}; font-weight: 700;">{r['d_chg']:,.1f}{unit}<br><span style="font-size:12px;">({r['d_pct']:+.2f}%)</span></td>
+                <td style="padding: 16px 10px; text-align: left; font-size: 13px; color: #8b95a1; line-height: 1.4;">{r['remarks']}</td>
             </tr>'''
         html += '</tbody></table></div>'
         st.markdown(html, unsafe_allow_html=True)
 
-    st.subheader("🇰🇷 국내 주식")
+    st.markdown("<h3 style='color:#191f28;'>🇰🇷 국내 주식</h3>", unsafe_allow_html=True)
     draw_toss_table([x for x in final_stock_list if not x['ticker'].isalpha()])
-    st.subheader("🇺🇸 해외 주식")
+    st.markdown("<h3 style='color:#191f28;'>🇺🇸 해외 주식</h3>", unsafe_allow_html=True)
     draw_toss_table([x for x in final_stock_list if x['ticker'].isalpha()])
 
-    # AI 분석 요청
+    # AI 뱅커 영역
     st.divider()
     with st.expander("🤖 AI 프라이빗 뱅커에게 분석 요청하기 (클릭하여 열기)", expanded=False):
         st.markdown("👇 아래 상자 우측 상단의 **복사(📋) 버튼**을 누르고, 저에게 붙여넣기 해주세요!")

@@ -70,7 +70,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ---------------- 보안 및 데이터 설정 ----------------
-FAMILY_PIN = "1204" 
+FAMILY_PIN = "1234" 
 
 if "logged_in" not in st.session_state:
     st.session_state["logged_in"] = False

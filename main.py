@@ -11,7 +11,7 @@ import gspread
 from google.oauth2.service_account import Credentials
 
 # 📱 앱 설정
-st.set_page_config(page_title="성우 & 지영 자산관리 V6.0", layout="wide")
+st.set_page_config(page_title="성우 & 지영 자산관리 V6.1", layout="wide")
 
 # 🎨 디자인 스타일
 st.markdown("""
@@ -70,7 +70,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ---------------- 보안 및 데이터 설정 ----------------
-FAMILY_PIN = "1234" 
+FAMILY_PIN = "1204" 
 
 if "logged_in" not in st.session_state:
     st.session_state["logged_in"] = False
@@ -126,7 +126,7 @@ else:
             for name in ["cash_list", "stocks", "history", "watchlist"]:
                 wks = sh.worksheet(name)
                 wks.clear()
-                if data[name]:
+                if data.get(name):
                     df = pd.DataFrame(data[name])
                     df = df.fillna("")
                     wks.update('A1', [df.columns.values.tolist()] + df.values.tolist())
@@ -200,8 +200,9 @@ else:
     with col_logout:
         if st.button("🔒 로그아웃", use_container_width=True): st.session_state["logged_in"] = False; st.rerun()
 
+    # 💡 탭 6개 (백업 탭) 정상 부활!
     with st.expander("✏️ 자산 데이터 관리 (입력/수정)"):
-        tab1, tab2, tab3, tab4, tab5 = st.tabs(["💵 현금", "📈 주식 등록", "⚙️ 보유주식 수정", "⭐ 관심종목", "📜 기록 관리"])
+        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["💵 현금", "📈 주식 등록", "⚙️ 보유주식 수정", "⭐ 관심종목", "📜 기록 관리", "💾 백업"])
         
         with tab1:
             with st.form("cash_form", clear_on_submit=True):
@@ -273,6 +274,20 @@ else:
                 col_h1, col_h2 = st.columns([4, 1])
                 col_h1.write(f"📅 {h['date']} | {h['total']:,}원")
                 if col_h2.button("삭제", key=f"hdel_{i}"): data["history"].pop(i); save_data(data); st.rerun()
+                
+        # 💡 여기가 빠져있던 백업 탭입니다!
+        with tab6:
+            st.warning("예전에 쓰던 데이터를 아래 상자에 넣고 복구를 누르시면 구글 시트로 한 번에 넘어갑니다.")
+            st.text_area("현재 내 데이터 (복사 보관용)", value=json.dumps(data, ensure_ascii=False), height=100)
+            restore_json = st.text_input("복구용 데이터 붙여넣기")
+            if st.button("데이터 복구 실행"):
+                try:
+                    new_data = json.loads(restore_json)
+                    save_data(new_data)
+                    st.success("데이터가 구글 시트로 완벽하게 복구되었습니다! 잠시 후 화면이 새로고침됩니다.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"올바른 형식이 아닙니다: {e}")
 
     st.divider()
     
@@ -281,19 +296,23 @@ else:
     unit, div = ("$", ex_rate) if is_usd_view else ("원", 1)
 
     processed_stocks = {}
-    for s in data["stocks"]:
+    for s in data.get("stocks", []):
         key = (s['ticker'], s['owner'])
         is_usd_in = "USD" in s.get("input_currency", "KRW")
-        price_krw = s['avg_price'] * ex_rate if is_usd_in else s['avg_price']
+        try: price_krw = float(s['avg_price']) * ex_rate if is_usd_in else float(s['avg_price'])
+        except: price_krw = 0.0
+        try: qty = float(s['qty'])
+        except: qty = 0.0
+        
         if key not in processed_stocks:
             processed_stocks[key] = {
                 "owner": s['owner'], "ticker": s['ticker'], "name_override": s.get('name', ''),
-                "is_overseas": s['is_overseas'], "qty": s['qty'], "total_buy_krw": price_krw * s['qty'],
+                "is_overseas": s['is_overseas'], "qty": qty, "total_buy_krw": price_krw * qty,
                 "notes": [f"{s['broker']}" + (f"({s['note']})" if s.get('note') else "")]
             }
         else:
-            processed_stocks[key]['qty'] += s['qty']
-            processed_stocks[key]['total_buy_krw'] += price_krw * s['qty']
+            processed_stocks[key]['qty'] += qty
+            processed_stocks[key]['total_buy_krw'] += price_krw * qty
             note_str = f"{s['broker']}" + (f"({s['note']})" if s.get('note') else "")
             if note_str not in processed_stocks[key]['notes']: processed_stocks[key]['notes'].append(note_str)
 

@@ -7,9 +7,11 @@ import plotly.express as px
 from datetime import datetime
 import urllib.request
 import re
+import gspread
+from google.oauth2.service_account import Credentials
 
 # 📱 앱 설정
-st.set_page_config(page_title="성우 & 지영 자산관리 V5.12", layout="wide")
+st.set_page_config(page_title="성우 & 지영 자산관리 V6.0", layout="wide")
 
 # 🎨 디자인 스타일
 st.markdown("""
@@ -68,7 +70,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ---------------- 보안 및 데이터 설정 ----------------
-FAMILY_PIN = "1210" # 💡 3번 반영: 비밀번호 1210로 변경 완료
+FAMILY_PIN = "1204" 
 
 if "logged_in" not in st.session_state:
     st.session_state["logged_in"] = False
@@ -82,7 +84,54 @@ if not st.session_state["logged_in"]:
         else: st.error("비밀번호가 틀렸습니다.")
     st.markdown("</div>", unsafe_allow_html=True)
 else:
-    DATA_FILE = "family_finance_data_v2.json"
+    def get_gspread_client():
+        scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+        secret_info = json.loads(st.secrets["gcp_service_account"])
+        credentials = Credentials.from_service_account_info(secret_info, scopes=scopes)
+        return gspread.authorize(credentials)
+
+    def init_sheets(sh):
+        existing = [w.title for w in sh.worksheets()]
+        for name in ["cash_list", "stocks", "history", "watchlist"]:
+            if name not in existing:
+                sh.add_worksheet(title=name, rows="500", cols="20")
+
+    def load_data():
+        try:
+            gc = get_gspread_client()
+            sh = gc.open_by_url(st.secrets["sheet_url"])
+            init_sheets(sh)
+            
+            data = {}
+            for name in ["cash_list", "stocks", "history", "watchlist"]:
+                wks = sh.worksheet(name)
+                records = wks.get_all_records()
+                data[name] = records if records else []
+                
+            for s in data.get("stocks", []):
+                if "name" not in s: s["name"] = ""
+                if "note" not in s: s["note"] = ""
+                if "is_overseas" in s:
+                    if str(s["is_overseas"]).upper() in ["TRUE", "1"]: s["is_overseas"] = True
+                    elif str(s["is_overseas"]).upper() in ["FALSE", "0"]: s["is_overseas"] = False
+            return data
+        except Exception as e:
+            st.error(f"구글 시트 연동 실패: {e}")
+            return {"cash_list": [], "stocks": [], "history": [], "watchlist": []}
+
+    def save_data(data):
+        try:
+            gc = get_gspread_client()
+            sh = gc.open_by_url(st.secrets["sheet_url"])
+            for name in ["cash_list", "stocks", "history", "watchlist"]:
+                wks = sh.worksheet(name)
+                wks.clear()
+                if data[name]:
+                    df = pd.DataFrame(data[name])
+                    df = df.fillna("")
+                    wks.update('A1', [df.columns.values.tolist()] + df.values.tolist())
+        except Exception as e:
+            st.error(f"구글 시트 저장 실패: {e}")
 
     KOR_NAMES = {
         "005930": "삼성전자", "000660": "SK하이닉스", "373220": "LG에너지솔루션", 
@@ -96,29 +145,6 @@ else:
         "PLTR": "팔란티어", "CPNG": "쿠팡", "ORCL": "오라클", "OXY": "옥시덴탈", "AMR": "알파 메탈러지컬", "BKSY": "블랙스카이"
     }
 
-    def load_data():
-        if os.path.exists(DATA_FILE):
-            try:
-                with open(DATA_FILE, "r", encoding="utf-8") as f:
-                    d = json.load(f)
-                    if "cash" in d and "cash_list" not in d:
-                        d["cash_list"] = [{"owner": k, "label": "현금", "amount": v, "currency": "KRW(원)"} for k, v in d["cash"].items()]
-                        del d["cash"]
-                    for c in d.get("cash_list", []):
-                        if "currency" not in c: c["currency"] = "KRW(원)"
-                    if "history" not in d: d["history"] = []
-                    for s in d.get("stocks", []):
-                        if "name" not in s: s["name"] = ""
-                        if "note" not in s: s["note"] = ""
-                    if "watchlist" not in d: d["watchlist"] = []
-                    return d
-            except: pass
-        return {"cash_list": [], "stocks": [], "history": [], "watchlist": []}
-
-    def save_data(data):
-        with open(DATA_FILE, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=4)
-
     @st.cache_data(ttl=600)
     def get_exchange_rate():
         for ticker in ["USDKRW=X", "KRW=X"]:
@@ -130,7 +156,7 @@ else:
 
     @st.cache_data(ttl=3600)
     def get_stock_data(ticker):
-        clean_ticker = ticker.upper().split('.')[0]
+        clean_ticker = str(ticker).upper().split('.')[0]
         real_name = KOR_NAMES.get(clean_ticker) or USA_NAMES.get(clean_ticker)
         
         if not real_name:
@@ -175,7 +201,7 @@ else:
         if st.button("🔒 로그아웃", use_container_width=True): st.session_state["logged_in"] = False; st.rerun()
 
     with st.expander("✏️ 자산 데이터 관리 (입력/수정)"):
-        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["💵 현금", "📈 주식 등록", "⚙️ 보유주식 수정", "⭐ 관심종목", "📜 기록 관리", "💾 백업"])
+        tab1, tab2, tab3, tab4, tab5 = st.tabs(["💵 현금", "📈 주식 등록", "⚙️ 보유주식 수정", "⭐ 관심종목", "📜 기록 관리"])
         
         with tab1:
             with st.form("cash_form", clear_on_submit=True):
@@ -209,8 +235,10 @@ else:
                 s_qty = col3.number_input("수량", min_value=0.0)
                 s_val = col4.number_input("평균단가", min_value=0.0)
                 s_note = st.text_input("비고 (계좌종류 등)")
+                if s_is_ovs: s_is_ovs_bool = True
+                else: s_is_ovs_bool = False
                 if st.form_submit_button("주식 추가"):
-                    data["stocks"].append({"owner": s_owner, "broker": s_broker, "ticker": s_ticker, "name": "", "is_overseas": s_is_ovs, "qty": s_qty, "avg_price": s_val, "input_currency": s_cur, "note": s_note})
+                    data["stocks"].append({"owner": s_owner, "broker": s_broker, "ticker": s_ticker, "name": "", "is_overseas": s_is_ovs_bool, "qty": s_qty, "avg_price": s_val, "input_currency": s_cur, "note": s_note})
                     save_data(data); st.rerun()
                     
         with tab3:
@@ -245,16 +273,6 @@ else:
                 col_h1, col_h2 = st.columns([4, 1])
                 col_h1.write(f"📅 {h['date']} | {h['total']:,}원")
                 if col_h2.button("삭제", key=f"hdel_{i}"): data["history"].pop(i); save_data(data); st.rerun()
-        
-        with tab6:
-            st.warning("데이터가 초기화되었을 때 아래 상자에 백업 텍스트를 넣고 복구를 누르세요.")
-            st.text_area("현재 내 데이터 (복사 보관용)", value=json.dumps(data, ensure_ascii=False), height=100)
-            restore_json = st.text_input("복구용 데이터 붙여넣기")
-            if st.button("데이터 복구 실행"):
-                try:
-                    data = json.loads(restore_json)
-                    save_data(data); st.success("복구 완료!"); st.rerun()
-                except: st.error("올바른 형식이 아닙니다.")
 
     st.divider()
     
@@ -335,7 +353,6 @@ else:
         val_div = 10000 if not is_usd_view else ex_rate
         h_df["총자산"], h_df["주식"], h_df["현금"] = h_df["total"]/val_div, h_df["stock"]/val_div, h_df["cash"]/val_div
         fig = px.line(h_df, x="date", y=["총자산", "주식", "현금"], markers=True)
-        # 💡 2번 반영: 차트 드래그(확대/축소) 비활성화로 모바일 스크롤 방해 금지!
         fig.update_layout(yaxis_title="만원" if not is_usd_view else "USD", legend_title="", plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', font=dict(color="#191f28"), dragmode=False)
         st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 
@@ -343,7 +360,6 @@ else:
         st.divider()
         st.markdown("<h3 style='color: #191f28;'>🍩 포트폴리오 비중</h3>", unsafe_allow_html=True)
         fig_pie = px.pie(pd.DataFrame(chart_data), values="평가금액", names="항목", hole=0.45)
-        # 💡 2번 반영: 파이 차트 드래그 비활성화
         fig_pie.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', font=dict(color="#191f28"), dragmode=False)
         st.plotly_chart(fig_pie, use_container_width=True, config={'displayModeBar': False})
 
@@ -361,14 +377,12 @@ else:
         tp_clr = 'toss-red' if total_profit > 0 else 'toss-blue' if total_profit < 0 else 'toss-black'
         tc_clr = 'toss-red' if total_d_chg > 0 else 'toss-blue' if total_d_chg < 0 else 'toss-black'
 
-        # ----------------- 🖥️ 데스크탑 뷰 -----------------
         desk_html = '<div class="desktop-view" style="overflow-x: auto; background-color: white; border-radius: 16px; padding: 10px 15px; box-shadow: 0 4px 20px rgba(0,0,0,0.03); margin-bottom: 25px;">'
         desk_html += '<table style="border-collapse: collapse; font-size: 14px; color: #191f28; white-space: nowrap; width: 100%;">'
         desk_html += '<thead><tr style="border-bottom: 1px solid #e5e8eb;">'
         cols = ["소유", "종목명", "수량", "현재가<br>(평단가)", "평가금액<br>(매입금액)", "평가손익<br>(수익률)", "전일대비", "비고"]
         for c in cols: 
             align = "center" if c in ['소유', '수량'] else "left" if c in ['종목명', '비고'] else "right"
-            # 💡 1번 반영: 데스크탑 종목명 칸 최대 너비 제한 (예쁘게 줄바꿈됨)
             style_add = " max-width: 150px; white-space: normal; word-break: keep-all;" if c == "종목명" else ""
             desk_html += f'<th style="padding: 10px 15px; text-align: {align}; color: #8b95a1; font-weight: 500; font-size: 13px;{style_add}">{c}</th>'
         desk_html += '</tr></thead><tbody>'
@@ -388,7 +402,6 @@ else:
             
             desk_html += f'<tr style="border-bottom: 1px solid #f2f4f6;">'
             desk_html += f'<td style="padding: 12px 15px; text-align: center; font-weight: 600; color: #191f28;">{r["owner"]}</td>'
-            # 💡 1번 반영: 데스크탑 종목명 데이터 줄바꿈 적용
             desk_html += f'<td style="padding: 12px 15px; text-align: left; font-weight: 600; color: #191f28; max-width: 150px; white-space: normal; word-break: keep-all;">{r["name"]}<br><span style="font-size:12px; color: #8b95a1; font-weight:400;">{r["ticker"]}</span></td>'
             desk_html += f'<td style="padding: 12px 15px; text-align: center; font-weight: 500; color: #191f28;">{int(r["qty"])}</td>'
             desk_html += f'<td style="padding: 12px 15px; text-align: right; font-weight: 500; color: #191f28;">{r["curr_p"]:,.1f}<br><span style="font-size:12px; color: #8b95a1;">({r["avg_p"]:,.1f})</span></td>'
@@ -398,12 +411,10 @@ else:
             desk_html += f'<td style="padding: 12px 15px; text-align: left; font-size: 13px; color: #8b95a1;">{r["remarks"]}</td></tr>'
         desk_html += '</tbody></table></div>'
 
-        # ----------------- 📱 모바일 MTS 뷰 -----------------
         mob_html = '<div class="mobile-view" style="overflow-x: auto; background-color: white; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.03); margin-bottom: 20px;">'
         mob_html += '<table style="border-collapse: collapse; font-size: 13px; color: #191f28; white-space: nowrap; width: 100%; min-width: 600px;">'
         
         mob_html += '<thead><tr style="border-bottom: 1px solid #e5e8eb; background-color: #f9fafb;">'
-        # 💡 1번 반영: 모바일 헤더 종목명 넓이 축소
         mob_html += '<th class="sticky-th" style="padding: 12px 10px; text-align: left; color: #8b95a1; font-weight: 600; max-width: 120px; white-space: normal; word-break: keep-all;">[소유] 종목명<br><span style="font-size: 11px;">보유수량</span></th>'
         mob_html += '<th style="padding: 12px 10px; text-align: right; color: #8b95a1; font-weight: 500;">현재가<br><span style="font-size: 11px;">(평단가)</span></th>'
         mob_html += '<th style="padding: 12px 10px; text-align: right; color: #8b95a1; font-weight: 500;">평가손익<br><span style="font-size: 11px;">(수익률)</span></th>'
@@ -425,7 +436,6 @@ else:
             c_clr = 'toss-red' if r['d_chg'] > 0 else 'toss-blue' if r['d_chg'] < 0 else 'toss-black'
             
             mob_html += f'<tr style="border-bottom: 1px solid #f2f4f6;">'
-            # 💡 1번 반영: 모바일 데이터 종목명 넓이 축소
             mob_html += f'<td class="sticky-col" style="padding: 12px 10px; text-align: left; max-width: 120px; white-space: normal; word-break: keep-all;">'
             mob_html += f'<div style="font-weight: 700; color: #191f28;">[{r["owner"]}] {r["name"]}</div>'
             mob_html += f'<div style="font-size: 12px; color: #8b95a1;">{int(r["qty"])}주</div></td>'
@@ -436,13 +446,12 @@ else:
             mob_html += f'<td style="padding: 12px 10px; text-align: right; font-weight: 700;" class="{c_clr}">{r["d_chg"]:,.1f}{unit}<br><span style="font-size:11px;">({r["d_pct"]:+.2f}%)</span></td></tr>'
         
         mob_html += '</tbody></table></div>'
-        
         st.markdown(desk_html + mob_html, unsafe_allow_html=True)
 
     st.markdown("<h3 style='color:#191f28;'>🇰🇷 국내 주식</h3>", unsafe_allow_html=True)
-    draw_responsive_table([x for x in final_stock_list if not x['ticker'].isalpha()])
+    draw_responsive_table([x for x in final_stock_list if not str(x['ticker']).isalpha()])
     st.markdown("<h3 style='color:#191f28;'>🇺🇸 해외 주식</h3>", unsafe_allow_html=True)
-    draw_responsive_table([x for x in final_stock_list if x['ticker'].isalpha()])
+    draw_responsive_table([x for x in final_stock_list if str(x['ticker']).isalpha()])
 
     if data.get("watchlist"):
         st.divider()
@@ -451,7 +460,6 @@ else:
         desk_wl_html = '<div class="desktop-view" style="overflow-x: auto; background-color: white; border-radius: 16px; padding: 10px 15px; box-shadow: 0 4px 20px rgba(0,0,0,0.03); margin-bottom: 25px;">'
         desk_wl_html += '<table style="border-collapse: collapse; font-size: 14px; color: #191f28; white-space: nowrap; width: 100%;">'
         desk_wl_html += '<thead><tr style="border-bottom: 1px solid #e5e8eb;">'
-        # 💡 1번 반영: 관심종목 데스크탑 넓이 축소
         desk_wl_html += '<th style="padding: 10px 15px; text-align: left; color: #8b95a1; font-weight: 500; font-size: 13px; max-width: 150px; white-space: normal; word-break: keep-all;">종목명</th>'
         desk_wl_html += '<th style="padding: 10px 15px; text-align: right; color: #8b95a1; font-weight: 500; font-size: 13px;">현재가</th>'
         desk_wl_html += '<th style="padding: 10px 15px; text-align: right; color: #8b95a1; font-weight: 500; font-size: 13px;">전일대비</th>'
@@ -460,7 +468,6 @@ else:
         mob_wl_html = '<div class="mobile-view" style="overflow-x: auto; background-color: white; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.03); margin-bottom: 20px;">'
         mob_wl_html += '<table style="border-collapse: collapse; font-size: 13px; color: #191f28; white-space: nowrap; width: 100%; min-width: 350px;">'
         mob_wl_html += '<thead><tr style="border-bottom: 1px solid #e5e8eb; background-color: #f9fafb;">'
-        # 💡 1번 반영: 관심종목 모바일 넓이 축소
         mob_wl_html += '<th class="sticky-th" style="padding: 12px 10px; text-align: left; color: #8b95a1; font-weight: 600; max-width: 120px; white-space: normal; word-break: keep-all;">종목명</th>'
         mob_wl_html += '<th style="padding: 12px 10px; text-align: right; color: #8b95a1; font-weight: 500;">현재가</th>'
         mob_wl_html += '<th style="padding: 12px 10px; text-align: right; color: #8b95a1; font-weight: 500;">전일대비</th>'
@@ -468,7 +475,7 @@ else:
 
         for w in data["watchlist"]:
             c_p, d_chg, d_pct, w_name = get_stock_data(w['ticker'])
-            is_us = w['ticker'].isalpha()
+            is_us = str(w['ticker']).isalpha()
             u_str = "$" if is_us else "원"
             
             c_p_str = f"{c_p:,.2f}" if is_us else f"{c_p:,.0f}"
@@ -487,7 +494,6 @@ else:
             
         desk_wl_html += '</tbody></table></div>'
         mob_wl_html += '</tbody></table></div>'
-        
         st.markdown(desk_wl_html + mob_wl_html, unsafe_allow_html=True)
 
     st.divider()

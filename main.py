@@ -11,7 +11,7 @@ import gspread
 from google.oauth2.service_account import Credentials
 
 # 📱 앱 설정
-st.set_page_config(page_title="성우 & 지영 자산관리 V6.2", layout="wide")
+st.set_page_config(page_title="성우 & 지영 자산관리 V6.4", layout="wide")
 
 # 🎨 디자인 스타일
 st.markdown("""
@@ -92,7 +92,8 @@ else:
 
     def init_sheets(sh):
         existing = [w.title for w in sh.worksheets()]
-        for name in ["cash_list", "stocks", "history", "watchlist"]:
+        # 💡 V6.4 나만의 사전(custom_dict) 시트 추가
+        for name in ["cash_list", "stocks", "history", "watchlist", "custom_dict"]:
             if name not in existing:
                 sh.add_worksheet(title=name, rows="500", cols="20")
 
@@ -103,14 +104,13 @@ else:
             init_sheets(sh)
             
             data = {}
-            for name in ["cash_list", "stocks", "history", "watchlist"]:
+            for name in ["cash_list", "stocks", "history", "watchlist", "custom_dict"]:
                 wks = sh.worksheet(name)
                 records = wks.get_all_records()
                 data[name] = records if records else []
                 
-            # 💡 V6.2 구글 시트 데이터 타입 강제 변환 (에러 방어)
             for s in data.get("stocks", []):
-                s["ticker"] = str(s.get("ticker", ""))  # 무조건 문자로 변환
+                s["ticker"] = str(s.get("ticker", ""))
                 if "name" not in s: s["name"] = ""
                 if "note" not in s: s["note"] = ""
                 if "is_overseas" in s:
@@ -118,18 +118,18 @@ else:
                     elif str(s["is_overseas"]).upper() in ["FALSE", "0"]: s["is_overseas"] = False
                     
             for w in data.get("watchlist", []):
-                w["ticker"] = str(w.get("ticker", "")) # 무조건 문자로 변환
+                w["ticker"] = str(w.get("ticker", ""))
                 
             return data
         except Exception as e:
             st.error(f"구글 시트 연동 실패: {e}")
-            return {"cash_list": [], "stocks": [], "history": [], "watchlist": []}
+            return {"cash_list": [], "stocks": [], "history": [], "watchlist": [], "custom_dict": []}
 
     def save_data(data):
         try:
             gc = get_gspread_client()
             sh = gc.open_by_url(st.secrets["sheet_url"])
-            for name in ["cash_list", "stocks", "history", "watchlist"]:
+            for name in ["cash_list", "stocks", "history", "watchlist", "custom_dict"]:
                 wks = sh.worksheet(name)
                 wks.clear()
                 if data.get(name):
@@ -148,7 +148,8 @@ else:
     USA_NAMES = {
         "AAPL": "애플", "MSFT": "마이크로소프트", "NVDA": "엔비디아", "TSLA": "테슬라",
         "AMZN": "아마존", "META": "메타 플랫폼스", "GOOGL": "알파벳 A", "MU": "마이크론",
-        "PLTR": "팔란티어", "CPNG": "쿠팡", "ORCL": "오라클", "OXY": "옥시덴탈", "AMR": "알파 메탈러지컬", "BKSY": "블랙스카이"
+        "PLTR": "팔란티어", "CPNG": "쿠팡", "ORCL": "오라클", "OXY": "옥시덴탈", "AMR": "알파 메탈러지컬", "BKSY": "블랙스카이",
+        "PFE": "화이자", "AMGN": "암젠", "SPY": "SPY ETF", "BIL": "BIL ETF"
     }
 
     @st.cache_data(ttl=600)
@@ -160,30 +161,45 @@ else:
             except: continue
         return 1380.0
 
+    # 💡 V6.4 나만의 사전 데이터를 받아서 이름을 최우선으로 찾아주는 로직 추가
     @st.cache_data(ttl=3600)
-    def get_stock_data(ticker):
-        ticker_str = str(ticker) # 💡 V6.2 무조건 문자로 변환
-        clean_ticker = ticker_str.upper().split('.')[0]
-        real_name = KOR_NAMES.get(clean_ticker) or USA_NAMES.get(clean_ticker)
+    def get_stock_data(ticker, custom_dict_tuple=()):
+        ticker_str = str(ticker).upper().split('.')[0]
+        custom_dict = dict(custom_dict_tuple)
         
+        # 1. 나만의 사전 -> 2. 내장 KOR 사전 -> 3. 내장 USA 사전 순서로 검색
+        real_name = custom_dict.get(ticker_str) or KOR_NAMES.get(ticker_str) or USA_NAMES.get(ticker_str)
+        
+        # 4. 그래도 없으면 인터넷 실시간 검색
         if not real_name:
-            real_name = clean_ticker
-            if clean_ticker.isdigit() and len(clean_ticker) == 6:
+            if ticker_str.isdigit() and len(ticker_str) == 6:
                 try:
-                    url = f"https://finance.naver.com/item/main.naver?code={clean_ticker}"
+                    url = f"https://finance.naver.com/item/main.naver?code={ticker_str}"
                     req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
                     html = urllib.request.urlopen(req, timeout=3).read().decode('euc-kr', errors='ignore')
                     match = re.search(r'<title>(.*?) : 네이버', html)
                     if match: real_name = match.group(1)
                 except: pass
             else:
+                # 💡 V6.4 네이버 통합검색 자동 스크래핑 (해외 주식 한글 이름 강제 추출)
                 try:
-                    info = yf.Ticker(ticker_str.upper()).info
-                    if info: real_name = info.get('shortName') or info.get('longName') or clean_ticker
+                    search_url = f"https://search.naver.com/search.naver?query={ticker_str}+주식"
+                    req = urllib.request.Request(search_url, headers={'User-Agent': 'Mozilla/5.0'})
+                    html = urllib.request.urlopen(req, timeout=3).read().decode('utf-8', errors='ignore')
+                    match = re.search(r'<span class="stk_nm">(.*?)</span>', html)
+                    if not match: match = re.search(r'<strong class="nx_tit">(.*?)</strong>', html)
+                    if match: real_name = match.group(1)
                 except: pass
+                
+                # 5. 최후의 보루: 야후 파이낸스 (영어 이름)
+                if not real_name:
+                    try:
+                        info = yf.Ticker(ticker_str).info
+                        if info: real_name = info.get('shortName') or info.get('longName') or ticker_str
+                    except: real_name = ticker_str
 
-        t_to_try = [ticker_str.upper()]
-        if clean_ticker.isdigit() and len(clean_ticker) == 6:
+        t_to_try = [ticker_str]
+        if ticker_str.isdigit() and len(ticker_str) == 6:
             if "." not in ticker_str: t_to_try = [ticker_str + ".KS", ticker_str + ".KQ"]
 
         for t in t_to_try:
@@ -200,6 +216,9 @@ else:
 
     data = load_data()
     ex_rate = get_exchange_rate()
+    
+    # 튜플 형태로 변환 (캐싱 최적화를 위해)
+    custom_tuple = tuple((str(x.get('ticker','')), str(x.get('name',''))) for x in data.get('custom_dict', []))
 
     st.markdown("<h2 style='font-weight: 700;'>📊 통합 자산 포트폴리오</h2>", unsafe_allow_html=True)
     col_rate, col_logout = st.columns([5, 1])
@@ -207,8 +226,9 @@ else:
     with col_logout:
         if st.button("🔒 로그아웃", use_container_width=True): st.session_state["logged_in"] = False; st.rerun()
 
+    # 💡 탭 7개로 확장 (나만의 사전 탭 신설)
     with st.expander("✏️ 자산 데이터 관리 (입력/수정)"):
-        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["💵 현금", "📈 주식 등록", "⚙️ 보유주식 수정", "⭐ 관심종목", "📜 기록 관리", "💾 백업"])
+        tab1, tab2, tab3, tab4, tab_dict, tab5, tab6 = st.tabs(["💵 현금", "📈 주식 등록", "⚙️ 보유주식 수정", "⭐ 관심종목", "📚 나만의 사전", "📜 기록 관리", "💾 백업"])
         
         with tab1:
             with st.form("cash_form", clear_on_submit=True):
@@ -274,7 +294,28 @@ else:
                 col_w1.write(f"⭐ {w['ticker']}")
                 if col_w2.button("삭제", key=f"wdel_{i}"):
                     data["watchlist"].pop(i); save_data(data); st.rerun()
-                        
+        
+        # 💡 V6.4 나만의 사전 관리 탭
+        with tab_dict:
+            st.info("💡 이름이 이상하게 나오는 종목이 있다면 여기에 딱 한 번만 등록하세요. 평생 자동으로 적용됩니다!")
+            with st.form("dict_form", clear_on_submit=True):
+                col_d1, col_d2 = st.columns(2)
+                d_ticker = col_d1.text_input("종목코드 (예: O, SPY)").upper()
+                d_name = col_d2.text_input("한글 이름 (예: 리얼티인컴)")
+                if st.form_submit_button("나만의 사전에 추가"):
+                    if d_ticker and d_name:
+                        existing_idx = next((i for i, item in enumerate(data.get("custom_dict", [])) if item["ticker"] == d_ticker), -1)
+                        if "custom_dict" not in data: data["custom_dict"] = []
+                        if existing_idx >= 0: data["custom_dict"][existing_idx]["name"] = d_name
+                        else: data["custom_dict"].append({"ticker": d_ticker, "name": d_name})
+                        save_data(data); st.rerun()
+            st.write("---")
+            for i, d_item in enumerate(data.get("custom_dict", [])):
+                col_d3, col_d4 = st.columns([4, 1])
+                col_d3.write(f"🏷️ **{d_item['ticker']}** : {d_item['name']}")
+                if col_d4.button("삭제", key=f"ddel_{i}"):
+                    data["custom_dict"].pop(i); save_data(data); st.rerun()
+
         with tab5:
             for i, h in enumerate(data.get("history", [])):
                 col_h1, col_h2 = st.columns([4, 1])
@@ -326,7 +367,8 @@ else:
     chart_data = []
 
     for key, p in processed_stocks.items():
-        curr_p, d_chg, d_pct, web_name = get_stock_data(p['ticker'])
+        # 💡 V6.4 커스텀 사전 데이터를 함수로 전달!
+        curr_p, d_chg, d_pct, web_name = get_stock_data(p['ticker'], custom_tuple)
         final_name = p['name_override'] if p['name_override'] else web_name
         eval_krw = p['qty'] * curr_p * (ex_rate if p['is_overseas'] else 1)
         total_stock_krw += eval_krw
@@ -498,7 +540,7 @@ else:
         mob_wl_html += '</tr></thead><tbody>'
 
         for w in data["watchlist"]:
-            c_p, d_chg, d_pct, w_name = get_stock_data(w['ticker'])
+            c_p, d_chg, d_pct, w_name = get_stock_data(w['ticker'], custom_tuple) # 💡 V6.4 관심종목에도 사전 적용
             is_us = str(w['ticker']).isalpha()
             u_str = "$" if is_us else "원"
             

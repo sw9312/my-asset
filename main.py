@@ -11,7 +11,7 @@ import gspread
 from google.oauth2.service_account import Credentials
 
 # 📱 앱 설정
-st.set_page_config(page_title="성우 & 지영 자산관리 V6.1", layout="wide")
+st.set_page_config(page_title="성우 & 지영 자산관리 V6.2", layout="wide")
 
 # 🎨 디자인 스타일
 st.markdown("""
@@ -108,12 +108,18 @@ else:
                 records = wks.get_all_records()
                 data[name] = records if records else []
                 
+            # 💡 V6.2 구글 시트 데이터 타입 강제 변환 (에러 방어)
             for s in data.get("stocks", []):
+                s["ticker"] = str(s.get("ticker", ""))  # 무조건 문자로 변환
                 if "name" not in s: s["name"] = ""
                 if "note" not in s: s["note"] = ""
                 if "is_overseas" in s:
                     if str(s["is_overseas"]).upper() in ["TRUE", "1"]: s["is_overseas"] = True
                     elif str(s["is_overseas"]).upper() in ["FALSE", "0"]: s["is_overseas"] = False
+                    
+            for w in data.get("watchlist", []):
+                w["ticker"] = str(w.get("ticker", "")) # 무조건 문자로 변환
+                
             return data
         except Exception as e:
             st.error(f"구글 시트 연동 실패: {e}")
@@ -156,7 +162,8 @@ else:
 
     @st.cache_data(ttl=3600)
     def get_stock_data(ticker):
-        clean_ticker = str(ticker).upper().split('.')[0]
+        ticker_str = str(ticker) # 💡 V6.2 무조건 문자로 변환
+        clean_ticker = ticker_str.upper().split('.')[0]
         real_name = KOR_NAMES.get(clean_ticker) or USA_NAMES.get(clean_ticker)
         
         if not real_name:
@@ -171,13 +178,13 @@ else:
                 except: pass
             else:
                 try:
-                    info = yf.Ticker(ticker.upper()).info
+                    info = yf.Ticker(ticker_str.upper()).info
                     if info: real_name = info.get('shortName') or info.get('longName') or clean_ticker
                 except: pass
 
-        t_to_try = [ticker.upper()]
+        t_to_try = [ticker_str.upper()]
         if clean_ticker.isdigit() and len(clean_ticker) == 6:
-            if "." not in ticker: t_to_try = [ticker + ".KS", ticker + ".KQ"]
+            if "." not in ticker_str: t_to_try = [ticker_str + ".KS", ticker_str + ".KQ"]
 
         for t in t_to_try:
             try:
@@ -200,7 +207,6 @@ else:
     with col_logout:
         if st.button("🔒 로그아웃", use_container_width=True): st.session_state["logged_in"] = False; st.rerun()
 
-    # 💡 탭 6개 (백업 탭) 정상 부활!
     with st.expander("✏️ 자산 데이터 관리 (입력/수정)"):
         tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["💵 현금", "📈 주식 등록", "⚙️ 보유주식 수정", "⭐ 관심종목", "📜 기록 관리", "💾 백업"])
         
@@ -244,7 +250,7 @@ else:
                     
         with tab3:
             for i, s in enumerate(data["stocks"]):
-                display_name = s.get('name') if s.get('name') else s['ticker']
+                display_name = s.get('name') if s.get('name') else str(s.get('ticker', ''))
                 with st.expander(f"[{s['owner']}] {display_name} ({s['broker']})"):
                     new_n = st.text_input("종목명 강제지정", value=s.get('name', ''), key=f"en_{i}", placeholder="비워두면 자동 검색됩니다")
                     new_q = st.number_input("수량", value=float(s['qty']), key=f"eq_{i}")
@@ -270,12 +276,11 @@ else:
                     data["watchlist"].pop(i); save_data(data); st.rerun()
                         
         with tab5:
-            for i, h in enumerate(data["history"]):
+            for i, h in enumerate(data.get("history", [])):
                 col_h1, col_h2 = st.columns([4, 1])
                 col_h1.write(f"📅 {h['date']} | {h['total']:,}원")
                 if col_h2.button("삭제", key=f"hdel_{i}"): data["history"].pop(i); save_data(data); st.rerun()
                 
-        # 💡 여기가 빠져있던 백업 탭입니다!
         with tab6:
             st.warning("예전에 쓰던 데이터를 아래 상자에 넣고 복구를 누르시면 구글 시트로 한 번에 넘어갑니다.")
             st.text_area("현재 내 데이터 (복사 보관용)", value=json.dumps(data, ensure_ascii=False), height=100)

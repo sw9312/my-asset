@@ -4,8 +4,9 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-from app_data import append_record, delete_record, export_json, load_data, migrate_missing_ids, replace_record
-from market import get_exchange_rate
+from app_data import (append_record, delete_by_key, delete_record, export_json, load_data,
+                      migrate_missing_ids, replace_record, upsert_by_key)
+from market import get_exchange_rate, get_stock_data
 from portfolio import build_portfolio, goal_projection, history_change, monthly_brief
 
 st.set_page_config(page_title="504호 자산관리", page_icon="🏡", layout="wide")
@@ -18,6 +19,18 @@ div[data-testid="stMetric"]{background:white;border:1px solid #e8ebef;padding:16
 
 def money(value, usd=False, rate=1):
     return f"${value / rate:,.0f}" if usd else f"{value:,.0f}원"
+
+
+def colored_metric(label, value, sub_value=None):
+    color = "#f04452" if value > 0 else "#3182f6" if value < 0 else "#191f28"
+    st.markdown(
+        f"<div style='background:white;border:1px solid #e8ebef;border-radius:16px;padding:16px'>"
+        f"<div style='color:#8b95a1;font-size:13px'>{label}</div>"
+        f"<div style='color:{color};font-size:22px;font-weight:800;margin-top:5px'>{money(value, usd, rate)}</div>"
+        + (f"<div style='color:{color};font-size:13px;font-weight:700'>{sub_value}</div>" if sub_value else "")
+        + "</div>",
+        unsafe_allow_html=True,
+    )
 
 
 def act(callback, message):
@@ -123,6 +136,18 @@ with home:
 
 with assets:
     st.subheader(f"{scope} 자산 상세")
+    total_buy = sum(row["buy_krw"] for row in stocks)
+    total_profit = stock_total - total_buy
+    total_return = total_profit / total_buy * 100 if total_buy else 0
+    total_day_change = sum(row["day_change_krw"] for row in stocks)
+    s1, s2, s3, s4 = st.columns(4)
+    s1.metric("총 매입금액", money(total_buy, usd, rate))
+    with s2:
+        colored_metric("총 평가손익", total_profit, f"{total_return:+.2f}%")
+    s3.metric("총 평가금액", money(stock_total, usd, rate))
+    with s4:
+        colored_metric("전일대비", total_day_change)
+
     rows = []
     for row in stocks:
         profit = row["eval_krw"] - row["buy_krw"]
@@ -138,7 +163,24 @@ with assets:
         })
     if rows:
         # 사용자 입력을 HTML로 조립하지 않아 스크립트/마크업 삽입을 막는다.
-        st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+        result_df = pd.DataFrame(rows)
+        def profit_color(value):
+            text = str(value).replace("원", "").replace("$", "").replace(",", "").replace("%", "")
+            try:
+                number = float(text)
+            except ValueError:
+                return ""
+            return "color:#f04452;font-weight:700" if number > 0 else "color:#3182f6;font-weight:700" if number < 0 else "color:#191f28"
+        styled = result_df.style.map(profit_color, subset=["평가손익", "수익률", "전일"])
+        st.dataframe(styled, hide_index=True, use_container_width=True)
+
+        pie_rows = [{"항목": row["name"], "평가금액": row["eval_krw"]} for row in stocks]
+        if cash_total:
+            pie_rows.append({"항목": "현금", "평가금액": cash_total})
+        st.subheader("포트폴리오 비중")
+        pie = px.pie(pd.DataFrame(pie_rows), values="평가금액", names="항목", hole=.45)
+        pie.update_layout(height=420, legend_title="", margin=dict(l=10, r=10, t=10, b=10))
+        st.plotly_chart(pie, use_container_width=True, config={"displayModeBar": False})
     else:
         st.info("등록된 투자 자산이 없습니다.")
     cash_rows = [{"소유":x.get("owner"),"항목":x.get("label"),"금액":x.get("amount"),"통화":x.get("currency")}
@@ -187,9 +229,23 @@ with brief:
     else:
         st.caption("이번 달 입출금을 기록하면 저축과 투자수익을 더 정확히 구분할 수 있어요.")
 
+    st.divider()
+    st.subheader("AI 프라이빗 뱅커 분석용 데이터")
+    prompt = (
+        "당신은 부부의 자산을 관리하는 프라이빗 뱅커입니다. 아래 포트폴리오를 분석해 주세요.\n"
+        f"총자산 {portfolio['total']:,.0f}원, 현금 {portfolio['cash']:,.0f}원, "
+        f"주식 {portfolio['stock']:,.0f}원.\n"
+    )
+    for row in portfolio["stocks"]:
+        profit = row["eval_krw"] - row["buy_krw"]
+        return_rate = profit / row["buy_krw"] * 100 if row["buy_krw"] else 0
+        prompt += f"- [{row['owner']}] {row['name']}({row['ticker']}): 평가액 {row['eval_krw']:,.0f}원, 수익률 {return_rate:+.2f}%\n"
+    prompt += "자산배분, 집중위험, 리밸런싱, 부부가 함께 실행할 행동 3가지를 제안해 주세요."
+    st.code(prompt, language="markdown")
+
 with manage:
-    cash_tab, stock_tab, goal_tab, tx_tab, edit_tab, backup_tab = st.tabs(
-        ["현금 추가","주식 추가","목표","입출금","수정·삭제","백업"]
+    cash_tab, stock_tab, goal_tab, tx_tab, watch_tab, dict_tab, history_tab, edit_tab, backup_tab = st.tabs(
+        ["현금 추가","주식 추가","목표","입출금","관심종목","종목 사전","기록 관리","수정·삭제","백업"]
     )
     with cash_tab, st.form("cash", clear_on_submit=True):
         owner = st.selectbox("소유", ["성우","지영","공동"])
@@ -240,6 +296,50 @@ with manage:
         if st.form_submit_button("기록", use_container_width=True):
             act(lambda: append_record("transactions", {"date":tx_date.isoformat(),"owner":owner,
                 "account":account,"category":category,"type":kind,"amount":amount,"currency":"KRW","memo":memo}), "기록했어요.")
+
+    with watch_tab:
+        with st.form("watch", clear_on_submit=True):
+            ticker = st.text_input("관심종목 코드").strip().upper()
+            if st.form_submit_button("관심종목 추가") and ticker:
+                act(lambda: append_record("watchlist", {"ticker":ticker}), "관심종목을 추가했어요.")
+        for row in data["watchlist"]:
+            price, change, pct, name = get_stock_data(row.get("ticker"), custom)
+            c1, c2, c3 = st.columns([3, 2, 1])
+            c1.write(f"⭐ **{name}** ({row.get('ticker')})")
+            color = "🔴" if change > 0 else "🔵" if change < 0 else "⚪"
+            c2.write(f"{price:,.2f} · {color} {pct:+.2f}%")
+            if c3.button("삭제", key=f"wd{row.get('id')}"):
+                act(lambda rid=row.get("id"): delete_record("watchlist", rid), "삭제했어요.")
+
+    with dict_tab:
+        st.info("자동 이름이 이상한 종목을 한 번 등록하면 계속 적용됩니다.")
+        with st.form("dictionary", clear_on_submit=True):
+            ticker = st.text_input("종목코드", key="dt").strip().upper()
+            name = st.text_input("표시할 한글 이름")
+            if st.form_submit_button("저장") and ticker and name:
+                act(lambda: upsert_by_key("custom_dict", "ticker", ticker, {"name":name}), "종목 이름을 저장했어요.")
+        for row in data["custom_dict"]:
+            c1, c2 = st.columns([5, 1])
+            c1.write(f"**{row.get('ticker')}** · {row.get('name')}")
+            if c2.button("삭제", key=f"dd{row.get('ticker')}"):
+                act(lambda ticker=row.get("ticker"): delete_by_key("custom_dict", "ticker", ticker), "삭제했어요.")
+
+    with history_tab:
+        if st.button("현재 자산 지금 기록하기", use_container_width=True):
+            snapshot = {"date":datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "total":int(portfolio["total"]), "stock":int(portfolio["stock"]), "cash":int(portfolio["cash"]),
+                        **{owner:int(portfolio["owner_totals"].get(owner, 0)) for owner in ("성우","지영","공동")}}
+            act(lambda: append_record("history", snapshot), "현재 자산을 기록했어요.")
+        history_rows = list(reversed(data["history"][-30:]))
+        if history_rows:
+            st.dataframe(pd.DataFrame(history_rows), hide_index=True, use_container_width=True)
+            selected_history = st.selectbox(
+                "삭제할 기록",
+                history_rows,
+                format_func=lambda row: f"{row.get('date')} · {float(row.get('total') or 0):,.0f}원",
+            )
+            if st.button("선택 기록 삭제"):
+                act(lambda: delete_record("history", selected_history.get("id")), "기록을 삭제했어요.")
 
     with edit_tab:
         kind = st.radio("편집할 자산", ["현금","주식"], horizontal=True)

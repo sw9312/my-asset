@@ -3,7 +3,6 @@ from datetime import datetime
 from uuid import uuid4
 
 import gspread
-import pandas as pd
 import streamlit as st
 from google.oauth2.service_account import Credentials
 
@@ -11,7 +10,7 @@ from google.oauth2.service_account import Credentials
 SHEETS = {
     "cash_list": ["id", "owner", "label", "amount", "currency", "updated_at"],
     "stocks": ["id", "owner", "broker", "ticker", "is_overseas", "qty", "avg_price", "input_currency", "name", "note", "updated_at"],
-    "history": ["date", "total", "stock", "cash", "성우", "지영", "공동"],
+    "history": ["id", "date", "total", "stock", "cash", "성우", "지영", "공동"],
     "watchlist": ["id", "ticker"],
     "custom_dict": ["ticker", "name"],
     "goals": ["id", "name", "target_amount", "target_date", "current_amount", "monthly_contribution", "expected_return", "owner", "icon"],
@@ -32,18 +31,53 @@ def _book():
 
 
 def init_sheets(book):
-    existing = {ws.title for ws in book.worksheets()}
+    worksheets = {ws.title: ws for ws in book.worksheets()}
     for name, headers in SHEETS.items():
-        if name not in existing:
+        if name not in worksheets:
             ws = book.add_worksheet(title=name, rows=500, cols=max(20, len(headers)))
             ws.update("A1", [headers])
+            continue
+
+        # Legacy sheets did not have IDs/timestamps, and newly-created empty
+        # sheets had a row of blank headers. gspread rejects both duplicate
+        # blank headers and rows wider than their header. Normalize once while
+        # preserving every value that has a named legacy column.
+        ws = worksheets[name]
+        values = ws.get_all_values()
+        if not values:
+            ws.update("A1", [headers])
+            continue
+
+        current_headers = [str(value).strip() for value in values[0]]
+        if current_headers == headers:
+            continue
+
+        normalized = []
+        for source_row in values[1:]:
+            record = {
+                header: source_row[index] if index < len(source_row) else ""
+                for index, header in enumerate(current_headers)
+                if header
+            }
+            if "id" in headers and not record.get("id"):
+                record["id"] = uuid4().hex[:12]
+            if "updated_at" in headers and not record.get("updated_at"):
+                record["updated_at"] = datetime.now().isoformat(timespec="seconds")
+            if any(str(record.get(key, "")).strip() for key in headers if key not in {"id", "updated_at"}):
+                normalized.append([record.get(key, "") for key in headers])
+
+        ws.clear()
+        ws.update("A1", [headers] + normalized)
 
 
 def load_data():
     try:
         book = _book()
         init_sheets(book)
-        data = {name: book.worksheet(name).get_all_records() for name in SHEETS}
+        data = {
+            name: book.worksheet(name).get_all_records(expected_headers=SHEETS[name])
+            for name in SHEETS
+        }
         for row in data["stocks"]:
             row["ticker"] = str(row.get("ticker", "")).strip().upper()
             row["is_overseas"] = str(row.get("is_overseas", "")).upper() in {"TRUE", "1"}
@@ -105,6 +139,33 @@ def delete_record(sheet_name, record_id):
     id_col = values[0].index("id")
     for row_no, row in enumerate(values[1:], start=2):
         if id_col < len(row) and row[id_col] == record_id:
+            ws.delete_rows(row_no)
+            return
+    raise ValueError("삭제할 항목을 찾지 못했습니다.")
+
+
+def upsert_by_key(sheet_name, key, value, updates):
+    ws = _book().worksheet(sheet_name)
+    values = ws.get_all_values()
+    headers = values[0] if values else SHEETS[sheet_name]
+    key_col = headers.index(key)
+    for row_no, row in enumerate(values[1:], start=2):
+        if key_col < len(row) and str(row[key_col]).upper() == str(value).upper():
+            current = {header: row[i] if i < len(row) else "" for i, header in enumerate(headers)}
+            current.update(updates)
+            ws.update(f"A{row_no}", [[current.get(header, "") for header in headers]])
+            return
+    append_record(sheet_name, dict(updates, **{key: value}))
+
+
+def delete_by_key(sheet_name, key, value):
+    ws = _book().worksheet(sheet_name)
+    values = ws.get_all_values()
+    if not values or key not in values[0]:
+        raise ValueError("삭제할 항목을 찾지 못했습니다.")
+    key_col = values[0].index(key)
+    for row_no, row in enumerate(values[1:], start=2):
+        if key_col < len(row) and str(row[key_col]).upper() == str(value).upper():
             ws.delete_rows(row_no)
             return
     raise ValueError("삭제할 항목을 찾지 못했습니다.")

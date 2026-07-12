@@ -8,6 +8,14 @@ from market import get_stock_data
 OWNERS = ("성우", "지영", "공동")
 
 
+def clamp_goal_controls(monthly_contribution, expected_return):
+    monthly = min(10_000_000, max(0, int(float(monthly_contribution or 0))))
+    monthly = int(round(monthly / 100_000) * 100_000)
+    expected = min(12.0, max(0.0, float(expected_return or 0)))
+    expected = round(expected * 2) / 2
+    return monthly, expected
+
+
 def build_portfolio(data, exchange_rate, custom_tuple=()):
     grouped = {}
     for stock in data.get("stocks", []):

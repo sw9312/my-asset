@@ -1,4 +1,5 @@
-from app_data import SHEETS, init_sheets
+import app_data
+from app_data import SHEETS, init_sheets, migrate_missing_ids
 
 
 class FakeWorksheet:
@@ -46,3 +47,16 @@ def test_init_sheets_repairs_blank_duplicate_headers():
     init_sheets(book)
     assert history.values[0] == SHEETS["history"]
     assert history.values[1][2:5] == ["100", "80", "20"]
+
+
+def test_migration_with_existing_ids_does_not_read_google_sheets(monkeypatch):
+    def fail_if_called():
+        raise AssertionError("Google Sheets should not be opened during a slider rerun")
+
+    monkeypatch.setattr(app_data, "_initialized_book", fail_if_called)
+    data = {
+        "cash_list": [{"id": "cash-1"}],
+        "stocks": [{"id": "stock-1"}],
+        "watchlist": [{"id": "watch-1"}],
+    }
+    assert migrate_missing_ids(data) is False

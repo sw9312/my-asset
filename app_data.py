@@ -19,6 +19,7 @@ SHEETS = {
 }
 
 
+@st.cache_resource(show_spinner=False)
 def _client():
     credentials = Credentials.from_service_account_info(
         json.loads(st.secrets["gcp_service_account"]),
@@ -27,6 +28,7 @@ def _client():
     return gspread.authorize(credentials)
 
 
+@st.cache_resource(show_spinner=False)
 def _book():
     return _client().open_by_url(st.secrets["sheet_url"])
 
@@ -71,25 +73,46 @@ def init_sheets(book):
         ws.update("A1", [headers] + normalized)
 
 
+@st.cache_resource(show_spinner=False)
+def _initialized_book():
+    book = _book()
+    init_sheets(book)
+    return book
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _load_data_cached():
+    book = _initialized_book()
+    data = {
+        name: book.worksheet(name).get_all_records(expected_headers=SHEETS[name])
+        for name in SHEETS
+    }
+    for row in data["stocks"]:
+        row["ticker"] = str(row.get("ticker", "")).strip().upper()
+        row["is_overseas"] = str(row.get("is_overseas", "")).upper() in {"TRUE", "1"}
+        row.setdefault("name", "")
+        row.setdefault("note", "")
+    for row in data["watchlist"]:
+        row["ticker"] = str(row.get("ticker", "")).strip().upper()
+    return data
+
+
 def load_data():
     try:
-        book = _book()
-        init_sheets(book)
-        data = {
-            name: book.worksheet(name).get_all_records(expected_headers=SHEETS[name])
-            for name in SHEETS
-        }
-        for row in data["stocks"]:
-            row["ticker"] = str(row.get("ticker", "")).strip().upper()
-            row["is_overseas"] = str(row.get("is_overseas", "")).upper() in {"TRUE", "1"}
-            row.setdefault("name", "")
-            row.setdefault("note", "")
-        for row in data["watchlist"]:
-            row["ticker"] = str(row.get("ticker", "")).strip().upper()
+        data = _load_data_cached()
+        st.session_state["last_good_sheet_data"] = data
         return data
     except Exception as exc:
+        fallback = st.session_state.get("last_good_sheet_data")
+        if fallback:
+            st.warning("Google Sheets 요청이 잠시 많아 마지막 정상 데이터를 표시합니다. 잠시 후 자동으로 갱신됩니다.")
+            return fallback
         st.error(f"구글 시트 연동 실패: {exc}")
         return {name: [] for name in SHEETS}
+
+
+def invalidate_data_cache():
+    _load_data_cached.clear()
 
 
 def _ensure_id(record):
@@ -106,14 +129,15 @@ def append_record(sheet_name, record):
     headers = SHEETS[sheet_name]
     record = dict(record, _sheet=sheet_name)
     record = _ensure_id(record)
-    ws = _book().worksheet(sheet_name)
+    ws = _initialized_book().worksheet(sheet_name)
     ws.append_row([record.get(key, "") for key in headers], value_input_option="USER_ENTERED")
+    invalidate_data_cache()
     return record
 
 
 def replace_record(sheet_name, record_id, updates):
     """Replace one matching row; concurrent edits in other rows are preserved."""
-    ws = _book().worksheet(sheet_name)
+    ws = _initialized_book().worksheet(sheet_name)
     values = ws.get_all_values()
     if not values:
         raise ValueError(f"{sheet_name} 시트에 헤더가 없습니다.")
@@ -128,12 +152,13 @@ def replace_record(sheet_name, record_id, updates):
             if "updated_at" in headers:
                 current["updated_at"] = datetime.now().isoformat(timespec="seconds")
             ws.update(f"A{row_no}", [[current.get(key, "") for key in headers]])
+            invalidate_data_cache()
             return
     raise ValueError("수정할 항목을 찾지 못했습니다.")
 
 
 def delete_record(sheet_name, record_id):
-    ws = _book().worksheet(sheet_name)
+    ws = _initialized_book().worksheet(sheet_name)
     values = ws.get_all_values()
     if not values or "id" not in values[0]:
         raise ValueError("삭제할 항목의 ID를 찾지 못했습니다.")
@@ -141,12 +166,13 @@ def delete_record(sheet_name, record_id):
     for row_no, row in enumerate(values[1:], start=2):
         if id_col < len(row) and row[id_col] == record_id:
             ws.delete_rows(row_no)
+            invalidate_data_cache()
             return
     raise ValueError("삭제할 항목을 찾지 못했습니다.")
 
 
 def upsert_by_key(sheet_name, key, value, updates):
-    ws = _book().worksheet(sheet_name)
+    ws = _initialized_book().worksheet(sheet_name)
     values = ws.get_all_values()
     headers = values[0] if values else SHEETS[sheet_name]
     key_col = headers.index(key)
@@ -155,12 +181,13 @@ def upsert_by_key(sheet_name, key, value, updates):
             current = {header: row[i] if i < len(row) else "" for i, header in enumerate(headers)}
             current.update(updates)
             ws.update(f"A{row_no}", [[current.get(header, "") for header in headers]])
+            invalidate_data_cache()
             return
     append_record(sheet_name, dict(updates, **{key: value}))
 
 
 def delete_by_key(sheet_name, key, value):
-    ws = _book().worksheet(sheet_name)
+    ws = _initialized_book().worksheet(sheet_name)
     values = ws.get_all_values()
     if not values or key not in values[0]:
         raise ValueError("삭제할 항목을 찾지 못했습니다.")
@@ -168,15 +195,22 @@ def delete_by_key(sheet_name, key, value):
     for row_no, row in enumerate(values[1:], start=2):
         if key_col < len(row) and str(row[key_col]).upper() == str(value).upper():
             ws.delete_rows(row_no)
+            invalidate_data_cache()
             return
     raise ValueError("삭제할 항목을 찾지 못했습니다.")
 
 
 def migrate_missing_ids(data):
     """One-time migration for legacy rows, done sheet-by-sheet before row edits."""
-    book = _book()
+    targets = [
+        sheet_name for sheet_name in ("cash_list", "stocks", "watchlist")
+        if data.get(sheet_name) and any(not row.get("id") for row in data[sheet_name])
+    ]
+    if not targets:
+        return False
+    book = _initialized_book()
     changed = False
-    for sheet_name in ("cash_list", "stocks", "watchlist"):
+    for sheet_name in targets:
         rows = data.get(sheet_name, [])
         if rows and any(not row.get("id") for row in rows):
             normalized = []
@@ -189,6 +223,8 @@ def migrate_missing_ids(data):
             ws.update("A1", [headers] + [[row.get(key, "") for key in headers] for row in normalized])
             data[sheet_name] = normalized
             changed = True
+    if changed:
+        invalidate_data_cache()
     return changed
 
 

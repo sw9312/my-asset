@@ -108,8 +108,10 @@ with home:
         ])
         if not owner_df.empty:
             fig = px.bar(owner_df, x="소유", y="금액", text_auto=".2s", color="소유")
-            fig.update_layout(showlegend=False, height=300, margin=dict(l=10, r=10, t=10, b=10))
-            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+            fig.update_layout(showlegend=False, height=300, margin=dict(l=10, r=10, t=10, b=10), dragmode=False)
+            fig.update_xaxes(fixedrange=True)
+            fig.update_yaxes(fixedrange=True)
+            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False, "scrollZoom": False})
     with right, st.container(border=True):
         st.subheader("오늘의 한 가지 행동")
         ratio = portfolio["cash"]/portfolio["total"]*100 if portfolio["total"] else 0
@@ -156,8 +158,10 @@ with home:
             df[key] = pd.to_numeric(df[key], errors="coerce")
         fig = px.line(df.rename(columns={"total":"총자산","stock":"주식","cash":"현금"}),
                       x="date", y=["총자산","주식","현금"], markers=True)
-        fig.update_layout(height=360, legend_title="", yaxis_title="원")
-        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+        fig.update_layout(height=360, legend_title="", yaxis_title="원", dragmode=False)
+        fig.update_xaxes(fixedrange=True)
+        fig.update_yaxes(fixedrange=True)
+        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False, "scrollZoom": False})
 
 with assets:
     st.subheader(f"{scope} 자산 상세")

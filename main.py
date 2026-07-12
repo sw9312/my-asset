@@ -7,7 +7,7 @@ import streamlit as st
 from app_data import (append_record, delete_by_key, delete_record, export_json, load_data,
                       migrate_missing_ids, replace_record, upsert_by_key)
 from market import get_exchange_rate, get_stock_data
-from portfolio import build_portfolio, goal_projection, history_change, monthly_brief
+from portfolio import build_portfolio, clamp_goal_controls, goal_projection, history_change, monthly_brief
 
 st.set_page_config(page_title="504호 자산관리", page_icon="🏡", layout="wide")
 st.markdown("""<style>
@@ -124,6 +124,31 @@ with home:
         st.subheader("이번 달 한 문장")
         st.write(monthly_brief(data["history"], portfolio))
 
+    st.subheader(f"✅ {date.today().month}월 우리 집 할 일")
+    this_month = date.today().strftime("%Y-%m")
+    monthly_tasks = [task for task in data["tasks"] if str(task.get("month")) == this_month]
+    if not monthly_tasks:
+        st.caption("이번 달 체크리스트가 비어 있어요. 아래에서 첫 할 일을 추가해 보세요.")
+    for task in monthly_tasks:
+        task_id = task.get("id")
+        checked = str(task.get("done", "")).upper() in {"TRUE", "1", "YES"}
+        c1, c2 = st.columns([10, 1])
+        new_checked = c1.checkbox(
+            f"[{task.get('owner') or '공동'}] {task.get('text')}",
+            value=checked,
+            key=f"task_{task_id}",
+        )
+        if new_checked != checked:
+            act(lambda tid=task_id, done=new_checked: replace_record("tasks", tid, {"done":done}), "체크리스트를 업데이트했어요.")
+        if c2.button("삭제", key=f"task_del_{task_id}"):
+            act(lambda tid=task_id: delete_record("tasks", tid), "할 일을 삭제했어요.")
+    with st.form("monthly_task", clear_on_submit=True):
+        tc1, tc2 = st.columns([4, 1])
+        task_text = tc1.text_input("이번 달 할 일", placeholder="예: 주택청약 잔액 확인")
+        task_owner = tc2.selectbox("담당", ["공동", "성우", "지영"])
+        if st.form_submit_button("체크리스트에 추가", use_container_width=True) and task_text.strip():
+            act(lambda: append_record("tasks", {"month":this_month, "text":task_text.strip(), "done":False, "owner":task_owner}), "이번 달 할 일을 추가했어요.")
+
     if data["history"]:
         st.subheader("자산 추이")
         df = pd.DataFrame(data["history"])
@@ -183,8 +208,13 @@ with assets:
         st.plotly_chart(pie, use_container_width=True, config={"displayModeBar": False})
     else:
         st.info("등록된 투자 자산이 없습니다.")
-    cash_rows = [{"소유":x.get("owner"),"항목":x.get("label"),"금액":x.get("amount"),"통화":x.get("currency")}
-                 for x in owned(data["cash_list"])]
+    cash_rows = []
+    for x in owned(data["cash_list"]):
+        amount = float(x.get("amount") or 0)
+        symbol = "$" if "USD" in str(x.get("currency")) else "₩"
+        cash_rows.append({"소유":x.get("owner"), "항목":x.get("label"),
+                          "금액":f"{symbol}{amount:,.2f}" if symbol == "$" else f"{symbol}{amount:,.0f}",
+                          "통화":x.get("currency")})
     if cash_rows:
         st.subheader("현금·예금")
         st.dataframe(pd.DataFrame(cash_rows), hide_index=True, use_container_width=True)
@@ -198,12 +228,17 @@ with future:
         with st.container(border=True):
             st.markdown(f"### {goal.get('icon') or '🎯'} {goal.get('name')}")
             c1, c2 = st.columns(2)
+            safe_monthly, safe_expected = clamp_goal_controls(
+                goal.get("monthly_contribution"), goal.get("expected_return")
+            )
             monthly = c1.slider("매월 모을 금액", 0, 10_000_000,
-                                int(float(goal.get("monthly_contribution") or 0)), 100_000,
+                                safe_monthly, 100_000,
                                 key=f"gm{goal.get('id')}")
             expected = c2.slider("기대 연 수익률", 0.0, 12.0,
-                                 float(goal.get("expected_return") or 0), .5,
+                                 safe_expected, .5,
                                  key=f"gr{goal.get('id')}")
+            c1.caption(f"월 저축액: **{monthly:,.0f}원**")
+            c2.caption(f"기대수익률: **{expected:,.1f}%**")
             result = goal_projection(dict(goal, monthly_contribution=monthly, expected_return=expected))
             st.progress(result["progress"]/100, text=f"현재 {result['progress']:.1f}%")
             a, b, c = st.columns(3)
@@ -224,6 +259,7 @@ with brief:
         df = pd.DataFrame(tx)
         df["amount"] = pd.to_numeric(df["amount"], errors="coerce").fillna(0)
         summary = df.groupby(["owner","type"], as_index=False)["amount"].sum()
+        summary["amount"] = summary["amount"].map(lambda value: f"{value:,.0f}원")
         st.dataframe(summary.rename(columns={"owner":"소유","type":"구분","amount":"금액"}),
                      hide_index=True, use_container_width=True)
     else:
@@ -251,6 +287,7 @@ with manage:
         owner = st.selectbox("소유", ["성우","지영","공동"])
         label = st.text_input("항목", "현금")
         amount = st.number_input("금액", min_value=0.0)
+        st.caption(f"입력 금액: **{amount:,.0f}**")
         curr = st.selectbox("통화", ["KRW(원)","USD(달러)"])
         if st.form_submit_button("추가", use_container_width=True):
             act(lambda: append_record("cash_list", {"owner":owner,"label":label,"amount":amount,"currency":curr}), "추가했어요.")
@@ -263,6 +300,8 @@ with manage:
         overseas = c2.checkbox("해외주식")
         qty = c1.number_input("수량", min_value=0.0, format="%.6f")
         avg = c2.number_input("평균단가", min_value=0.0)
+        c1.caption(f"수량: **{qty:,.6f}**".rstrip("0").rstrip("."))
+        c2.caption(f"평균단가: **{avg:,.2f}**")
         curr = st.selectbox("평단가 통화", ["USD(달러)","KRW(원)"] if overseas else ["KRW(원)","USD(달러)"])
         note = st.text_input("계좌·비고")
         if st.form_submit_button("추가", use_container_width=True) and ticker:
@@ -276,6 +315,8 @@ with manage:
         target_date = c2.date_input("목표일")
         current = c1.number_input("이미 모은 금액", min_value=0.0, step=1_000_000.0)
         monthly = c2.number_input("월 저축액", min_value=0.0, step=100_000.0)
+        c1.caption(f"목표: **{target:,.0f}원** · 현재: **{current:,.0f}원**")
+        c2.caption(f"월 저축: **{monthly:,.0f}원**")
         expected = c1.number_input("기대 연 수익률(%)", 0.0, 30.0, 3.0)
         owner = c2.selectbox("소유", ["공동","성우","지영"], key="go")
         icon = st.text_input("아이콘", "🎯", max_chars=2)
@@ -292,6 +333,7 @@ with manage:
         account = c1.text_input("계좌")
         category = c2.text_input("분류")
         amount = st.number_input("금액", min_value=0.0, key="ta")
+        st.caption(f"입력 금액: **{amount:,.0f}원**")
         memo = st.text_input("메모")
         if st.form_submit_button("기록", use_container_width=True):
             act(lambda: append_record("transactions", {"date":tx_date.isoformat(),"owner":owner,
@@ -332,7 +374,11 @@ with manage:
             act(lambda: append_record("history", snapshot), "현재 자산을 기록했어요.")
         history_rows = list(reversed(data["history"][-30:]))
         if history_rows:
-            st.dataframe(pd.DataFrame(history_rows), hide_index=True, use_container_width=True)
+            history_display = pd.DataFrame(history_rows).copy()
+            for column in ["total", "stock", "cash", "성우", "지영", "공동"]:
+                if column in history_display.columns:
+                    history_display[column] = pd.to_numeric(history_display[column], errors="coerce").fillna(0).map(lambda value: f"{value:,.0f}원")
+            st.dataframe(history_display, hide_index=True, use_container_width=True)
             selected_history = st.selectbox(
                 "삭제할 기록",
                 history_rows,

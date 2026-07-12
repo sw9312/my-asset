@@ -15,6 +15,7 @@ SHEETS = {
     "custom_dict": ["ticker", "name"],
     "goals": ["id", "name", "target_amount", "target_date", "current_amount", "monthly_contribution", "expected_return", "owner", "icon"],
     "transactions": ["id", "date", "owner", "account", "category", "type", "amount", "currency", "memo"],
+    "tasks": ["id", "month", "text", "done", "owner", "updated_at"],
 }
 
 

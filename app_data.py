@@ -33,60 +33,71 @@ def _book():
     return _client().open_by_url(st.secrets["sheet_url"])
 
 
-def init_sheets(book):
+def ensure_sheet_tabs(book):
     worksheets = {ws.title: ws for ws in book.worksheets()}
     for name, headers in SHEETS.items():
         if name not in worksheets:
             ws = book.add_worksheet(title=name, rows=500, cols=max(20, len(headers)))
             ws.update("A1", [headers])
-            continue
+            worksheets[name] = ws
+    return worksheets
 
-        # Legacy sheets did not have IDs/timestamps, and newly-created empty
-        # sheets had a row of blank headers. gspread rejects both duplicate
-        # blank headers and rows wider than their header. Normalize once while
-        # preserving every value that has a named legacy column.
-        ws = worksheets[name]
-        values = ws.get_all_values()
-        if not values:
-            ws.update("A1", [headers])
-            continue
 
-        current_headers = [str(value).strip() for value in values[0]]
-        if current_headers == headers:
-            continue
+def normalize_sheet_values(name, values):
+    """Return canonical values and whether the worksheet needs one rewrite."""
+    headers = SHEETS[name]
+    if not values:
+        return [headers], True
+    current_headers = [str(value).strip() for value in values[0]]
+    if current_headers == headers:
+        return values, False
 
-        normalized = []
-        for source_row in values[1:]:
-            record = {
-                header: source_row[index] if index < len(source_row) else ""
-                for index, header in enumerate(current_headers)
-                if header
-            }
-            if "id" in headers and not record.get("id"):
-                record["id"] = uuid4().hex[:12]
-            if "updated_at" in headers and not record.get("updated_at"):
-                record["updated_at"] = datetime.now().isoformat(timespec="seconds")
-            if any(str(record.get(key, "")).strip() for key in headers if key not in {"id", "updated_at"}):
-                normalized.append([record.get(key, "") for key in headers])
+    normalized = []
+    for source_row in values[1:]:
+        record = {
+            header: source_row[index] if index < len(source_row) else ""
+            for index, header in enumerate(current_headers)
+            if header
+        }
+        if "id" in headers and not record.get("id"):
+            record["id"] = uuid4().hex[:12]
+        if "updated_at" in headers and not record.get("updated_at"):
+            record["updated_at"] = datetime.now().isoformat(timespec="seconds")
+        if any(str(record.get(key, "")).strip() for key in headers if key not in {"id", "updated_at"}):
+            normalized.append([record.get(key, "") for key in headers])
+    return [headers] + normalized, True
 
-        ws.clear()
-        ws.update("A1", [headers] + normalized)
+
+def values_to_records(name, values):
+    headers = SHEETS[name]
+    return [
+        {header: row[index] if index < len(row) else "" for index, header in enumerate(headers)}
+        for row in values[1:]
+        if any(str(cell).strip() for cell in row)
+    ]
 
 
 @st.cache_resource(show_spinner=False)
 def _initialized_book():
-    book = _book()
-    init_sheets(book)
-    return book
+    return _book()
 
 
 @st.cache_data(ttl=300, show_spinner=False)
 def _load_data_cached():
     book = _initialized_book()
-    data = {
-        name: book.worksheet(name).get_all_records(expected_headers=SHEETS[name])
-        for name in SHEETS
-    }
+    worksheets = ensure_sheet_tabs(book)
+    names = list(SHEETS)
+    # One batch API call replaces one get_all_values/get_all_records call per tab.
+    response = book.values_batch_get([f"'{name}'!A1:Z500" for name in names])
+    value_ranges = response.get("valueRanges", [])
+    data = {}
+    for index, name in enumerate(names):
+        values = value_ranges[index].get("values", []) if index < len(value_ranges) else []
+        canonical, changed = normalize_sheet_values(name, values)
+        if changed:
+            worksheets[name].clear()
+            worksheets[name].update("A1", canonical)
+        data[name] = values_to_records(name, canonical)
     for row in data["stocks"]:
         row["ticker"] = str(row.get("ticker", "")).strip().upper()
         row["is_overseas"] = str(row.get("is_overseas", "")).upper() in {"TRUE", "1"}
